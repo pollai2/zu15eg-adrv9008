@@ -11,28 +11,21 @@
  *
  * Copyright (C) 2019 Analog Devices Inc.
  */
-#include "zynqmp-zcu102-rev1.0.dts"
+#include "zynqmp-zu15eg-revA.dts"
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/jesd204/adxcvr.h>
 
-&i2c1 {
-	i2c-mux@75 {
-		i2c@1 { /* HPC1 */
-			#address-cells = <1>;
-			#size-cells = <0>;
-			reg = <1>;
+&i2c0 {
+       	fmc1_conn:fmc@0x52{
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x52>;	
+	    }
 
-			ad7291@2f {
-				compatible = "adi,ad7291";
-				reg = <0x2f>;
-			};
-
-			eeprom@50 {
+			eeprom@53 {
 				compatible = "at24,24c02";
-				reg = <0x50>;
+				reg = <0x53>;
 			};
-		};
-	};
 };
 
 / {
