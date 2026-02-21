@@ -10,6 +10,20 @@
 / {
       model = "ZynqMP ZU15EG RevA";
       compatible = "xlnx,zynqmp";
+aliases {
+		ethernet0 = &gem3;
+        ethernet1 = &gem0
+		i2c0 = &i2c0;
+		mmc0 = &sdhci1;
+		nvmem0 = &eeprom;
+		rtc0 = &rtc;
+		usb0 = &typec-portc;
+        fmcconn = &fmc;
+	};
+	chosen {
+		bootargs = "earlycon";
+		stdout-path = "serial0:115200n8";
+	};
 	
 	regulators {
 		compatible = "simple-bus";
@@ -132,7 +146,7 @@
 &spi0 {
 	spinode: spidev@0x0 {
 		compatible = "rohm,dh2228fv";
-		status = "disabled";
+		status = "okay";
 		reg = <0>;
 		spi-max-frequency = <100000000>;
 	};
