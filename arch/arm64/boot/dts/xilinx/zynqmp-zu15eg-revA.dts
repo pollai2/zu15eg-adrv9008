@@ -1,1 +1,278 @@
 
+#include <dt-bindings/gpio/gpio.h>
+/ {
+
+	
+	regulators {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+		reg_ssd_vqmmc: regulator_ssd_vqmmc {
+			compatible = "regulator-gpio";
+			regulator-name = "ssd_vqmmc";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <3300000>;
+			regulator-type = "voltage";
+			gpios = <&gpio 43 0>;
+			gpios-states = <0>;
+			states = <3300000 0
+				1800000 1>;
+		};
+		vbus_reg: regulator-vbus {
+			compatible = "regulator-fixed";
+			regulator-name = "vbus_5V";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+			off-on-delay-us = <20000>;
+		};
+	};
+	
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+		rpu0vdev0vring0: rpu0vdev0vring0@70040000 {
+			no-map;
+			reg = <0x0 0x70040000 0x0 0x4000>;
+		};
+		rpu0vdev0vring1: rpu0vdev0vring1@70044000 {
+			no-map;
+			reg = <0x0 0x70044000 0x0 0x4000>;
+		};
+		rpu0vdev0buffer: rpu0vdev0buffer@70048000 {
+			no-map;
+			reg = <0x0 0x70048000 0x0 0x100000>;
+		};
+		rproc_0_reserved: rproc@70000000 {
+			no-map;
+			reg = <0x0 0x70000000 0x0 0x40000>;
+		};
+	};
+
+	tcm_0a@ffe00000 {
+		no-map;
+		reg = <0x0 0xffe00000 0x0 0x10000>;
+		phandle = <0x40>;
+		status = "okay";
+		compatible = "mmio-sram";
+		power-domain = <&zynqmp_firmware 15>;
+	};
+
+	tcm_0b@ffe20000 {
+		no-map;
+		reg = <0x0 0xffe20000 0x0 0x10000>;
+		phandle = <0x41>;
+		status = "okay";
+		compatible = "mmio-sram";
+		power-domain = <&zynqmp_firmware 16>;
+	};
+
+	rf5ss@ff9a0000 {
+		compatible = "xlnx,zynqmp-r5-remoteproc";
+		xlnx,cluster-mode = <1>;
+		ranges;
+		reg = <0x0 0xFF9A0000 0x0 0x10000>;
+		#address-cells = <0x2>;
+		#size-cells = <0x2>;
+			r5f_0 {
+				compatible = "xilinx,r5f";
+				#address-cells = <2>;
+				#size-cells = <2>;
+				ranges;
+				sram = <0x40 0x41>;
+				memory-region = <&rproc_0_reserved>, <&rpu0vdev0buffer>, <&rpu0vdev0vring0>, <&rpu0vdev0vring1>;
+				power-domain = <&zynqmp_firmware 7>;
+				mboxes = <&ipi_mailbox_rpu0 0>, <&ipi_mailbox_rpu0 1>;
+				mbox-names = "tx", "rx";
+		};
+	};
+
+	zynqmp_ipi1 {
+		compatible = "xlnx,zynqmp-ipi-mailbox";
+		interrupt-parent = <&gic>;
+		interrupts = <0 29 4>;
+		xlnx,ipi-id = <7>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+		/* APU<->RPU0 IPI mailbox controller */
+		ipi_mailbox_rpu0: mailbox@ff990600 {
+			reg = <0xff990600 0x20>,
+			<0xff990620 0x20>,
+			<0xff9900c0 0x20>,
+			<0xff9900e0 0x20>;
+			reg-names = "local_request_region",
+			"local_response_region",
+			"remote_request_region",
+			"remote_response_region";
+			#mbox-cells = <1>;
+			xlnx,ipi-id = <1>;
+		};
+
+	};
+
+	refclk_dp: refclk_dp {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <27000000>;
+	};
+	iwg65m_info {
+		compatible = "iwave,iwg65m-info";
+	};
+};
+&spi0 {
+	spinode: spidev@0x0 {
+		compatible = "rohm,dh2228fv";
+		status = "disabled";
+		reg = <0>;
+		spi-max-frequency = <100000000>;
+	};
+};
+&can0 {
+	pwdn-gpio = <&gpio 80 0>;
+};
+&gem0 {
+	phy-handle = <&phy0>;
+	phy-reset-gpio = <&gpio 42 1>;
+	phy-reset-active-low;
+	phy-reset-duration = <20>;
+	phy0: phy@1 {
+		reg = <1>;
+		ti,rx-internal-delay = <0x8>;
+		ti,tx-internal-delay = <0xa>;
+		ti,fifo-depth = <0x1>;
+		ti,rxctrl-strap-worka;
+		at803x,led-act-blind-workaround;
+		at803x,eee-disabled;
+		at803x,vddio-1p8v;
+		interrupt-parent = <&gpio>;
+		interrupts = <12 8>;
+	};
+};
+&gem3 {
+	phy-handle = <&phy1>;
+	phy-reset-gpio = <&gpio 81 1>;
+	phy-reset-active-low;
+	phy-reset-duration = <20>;
+	phy1: phy@1 {
+		reg = <1>;
+		compatible = "ethernet-phy-id004d.d074";
+		ti,rx-internal-delay = <0x8>;
+		ti,tx-internal-delay = <0xa>;
+		ti,fifo-depth = <0x1>;
+		ti,rxctrl-strap-worka;
+		at803x,led-act-blind-workaround;
+		at803x,eee-disabled;
+		at803x,vddio-1p8v;
+		interrupt-parent = <&gpio>;
+		interrupts = <82 8>;
+	};
+};
+&i2c0 {
+       
+	clock-frequency = <400000>;
+	pmic_1: pmic1_da9062@48 {
+		compatible = "dlg,da9062";
+		reg = <0x48>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio{
+			compatible = "dlg,da9062-gpio";
+		};
+	};
+	pmic_2: pmic2_da9062@58 {
+		compatible = "dlg,da9062";
+		reg = <0x58>;
+                gpio-controller;
+		#gpio-cells = <2>;
+		rtc {
+			compatible = "dlg,da9062-rtc";
+		};
+		gpio{
+			compatible = "dlg,da9062-gpio";
+		};
+	};
+	tca6416:gpio@21 {
+		compatible = "ti,tca6416";
+		reg = <0x21>;
+		gpio-controller;
+		#gpio-cells = <2>;
+
+		gtr_sel0 {
+			gpio-hog;
+			gpios = <4 0>;
+			output-high; /* RS0 = 1 */
+			line-name = "sel0";
+		};
+
+		gtr_sel1 {
+			gpio-hog;
+			gpios = <5 0>;
+			output-low; /* Enable Transceiver */
+			line-name = "sel1";
+		};
+	};
+	fusb302: typec-portc@22 {
+		compatible = "fcs,fusb302";
+		reg = <0x22>;
+		fcs,int_n = <&gpio 78 8>;
+		fcs,cc = <&gpio 79 0>;
+		fcs,power_en = <&gpio 25 0>;
+		vbus-supply = <&vbus_reg>;
+		status = "okay";
+	};
+	som_eeprom: eeprom@53 {
+		compatible = "atmel,24mac402";
+		reg = <0x53>;
+		pagesize = <16>;
+		address-width = <8>;		
+		size = <256>;	
+	};
+	fmc1_conn:fmc@0x52{
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x52>;	
+	}
+	
+};
+&pcie {
+	misc = <&gpio 83 8>;
+};
+&sata {
+	ceva,p0-cominit-params = <0x18401828>;
+	ceva,p0-comwake-params = <0x614080e>;
+	ceva,p0-burst-params = <0x13084a06>;
+	ceva,p0-retry-params = <0x96a43ffc>;
+	ceva,p1-cominit-params = <0x18401828>;
+	ceva,p1-comwake-params = <0x614080e>;
+	ceva,p1-burst-params = <0x13084a06>;
+	ceva,p1-retry-params = <0x96a43ffc>;
+	ceva,broken-gen3;
+};
+&dwc3_0 {
+	dr_mode = "otg";
+	snps,dis_u2_susphy_quirk;
+	snps,dis_u3_susphy_quirk;
+	maximum-speed = "super-speed";
+};
+&sdhci0{
+	bus-width = <8>;
+};
+&sdhci1 {
+	clock-frequency = <200000000>;
+	bus-width = <4>;
+	xlnx,has-cd = <0x1>;
+	vqmmc-supply = <&reg_ssd_vqmmc>;
+};
+&rtc {
+	status = "disabled";
+};
+&SDI_SDI_IN_v_frmbuf_wr_0 {
+	xlnx,dma-align = <32>;
+};
+&psgtr {
+	clocks =  <&refclk_dp>;
+	clock-names = "ref1";
+};
+
