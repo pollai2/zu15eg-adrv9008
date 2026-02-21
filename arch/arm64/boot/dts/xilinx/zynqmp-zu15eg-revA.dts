@@ -9,7 +9,7 @@
 #include <dt-bindings/phy/phy.h>
 / {
       model = "ZynqMP ZU15EG RevA";
-      compatible = "xlnx,zynqmp";
+      compatible = "xlnx,zynqmp-zu15eg-revA","xlnx,zynqmp";
 aliases {
 		ethernet0 = &gem3;
         ethernet1 = &gem0
