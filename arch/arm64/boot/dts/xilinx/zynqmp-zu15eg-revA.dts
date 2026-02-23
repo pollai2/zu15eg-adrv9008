@@ -13,12 +13,12 @@
 aliases {
 		ethernet0 = &gem3;
         ethernet1 = &gem0
-		i2c0 = &i2c0;
+		i2c = &i2c0;
 		mmc0 = &sdhci1;
-		nvmem0 = &eeprom;
+		nvmem0 = &som_eeprom;
 		rtc0 = &rtc;
-		usb0 = &typec-portc;
-        fmcconn = &fmc;
+		usb0 = &fusb302;
+        fmcconn = &fmc1_conn;
 	};
 	chosen {
 		bootargs = "earlycon";
@@ -255,7 +255,7 @@ aliases {
 		#address-cells = <1>;
 		#size-cells = <0>;
 		reg = <0x52>;	
-	}
+	};
 	
 };
 &pcie {
