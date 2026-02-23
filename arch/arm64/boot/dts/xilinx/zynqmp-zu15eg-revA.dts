@@ -12,7 +12,7 @@
       compatible = "xlnx,zynqmp-zu15eg-revA","xlnx,zynqmp";
 aliases {
 		ethernet0 = &gem3;
-        ethernet1 = &gem0
+        ethernet1 = &gem0;
 		i2c = &i2c0;
 		mmc0 = &sdhci1;
 		nvmem0 = &som_eeprom;
@@ -92,6 +92,7 @@ aliases {
 
 	rf5ss@ff9a0000 {
 		compatible = "xlnx,zynqmp-r5-remoteproc";
+		status = "okay";
 		xlnx,cluster-mode = <1>;
 		ranges;
 		reg = <0x0 0xFF9A0000 0x0 0x10000>;
@@ -289,9 +290,6 @@ aliases {
 };
 &rtc {
 	status = "disabled";
-};
-&SDI_SDI_IN_v_frmbuf_wr_0 {
-	xlnx,dma-align = <32>;
 };
 &psgtr {
 	clocks =  <&refclk_dp>;
