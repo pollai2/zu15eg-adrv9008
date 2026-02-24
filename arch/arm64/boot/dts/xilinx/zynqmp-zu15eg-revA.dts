@@ -193,66 +193,83 @@ aliases {
 	};
 };
 &i2c0 {
-       
-	clock-frequency = <400000>;
-	pmic_1: pmic1_da9062@48 {
-		compatible = "dlg,da9062";
-		reg = <0x48>;
-		gpio-controller;
-		#gpio-cells = <2>;
-		gpio{
-			compatible = "dlg,da9062-gpio";
-		};
-	};
-	pmic_2: pmic2_da9062@58 {
-		compatible = "dlg,da9062";
-		reg = <0x58>;
-                gpio-controller;
-		#gpio-cells = <2>;
-		rtc {
-			compatible = "dlg,da9062-rtc";
-		};
-		gpio{
-			compatible = "dlg,da9062-gpio";
-		};
-	};
-	tca6416:gpio@21 {
-		compatible = "ti,tca6416";
-		reg = <0x21>;
-		gpio-controller;
-		#gpio-cells = <2>;
+    clock-frequency = <400000>;
 
-		gtr_sel0 {
-			gpio-hog;
-			gpios = <4 0>;
-			output-high; /* RS0 = 1 */
-			line-name = "sel0";
-		};
+    pmic_1: pmic1_da9062@48 {
+        compatible = "dlg,da9062";
+        reg = <0x48>;
+        gpio-controller;
+        #gpio-cells = <2>;
+        gpio {
+            compatible = "dlg,da9062-gpio";
+        };
+    };
 
-		gtr_sel1 {
-			gpio-hog;
-			gpios = <5 0>;
-			output-low; /* Enable Transceiver */
-			line-name = "sel1";
-		};
-	};
-	fusb302: typec-portc@22 {
-		compatible = "fcs,fusb302";
-		reg = <0x22>;
-		fcs,int_n = <&gpio 78 8>;
-		fcs,cc = <&gpio 79 0>;
-		fcs,power_en = <&gpio 25 0>;
-		vbus-supply = <&vbus_reg>;
-		status = "okay";
-	};
-	som_eeprom: eeprom@52 {
-		compatible = "atmel,24mac402";
-		reg = <0x52>;
-		pagesize = <16>;
-		address-width = <8>;		
-		size = <256>;	
-	};
-	
+    pmic_2: pmic2_da9062@58 {
+        compatible = "dlg,da9062";
+        reg = <0x58>;
+        gpio-controller;
+        #gpio-cells = <2>;
+        rtc {
+            compatible = "dlg,da9062-rtc";
+        };
+        gpio {
+            compatible = "dlg,da9062-gpio";
+        };
+    };
+
+    tca6416: gpio@21 {
+        compatible = "ti,tca6416";
+        reg = <0x21>;
+        gpio-controller;
+        #gpio-cells = <2>;
+
+        gtr_sel0 {
+            gpio-hog;
+            gpios = <4 0>;
+            output-high; /* RS0 = 1 */
+            line-name = "sel0";
+        };
+
+        gtr_sel1 {
+            gpio-hog;
+            gpios = <5 0>;
+            output-low; /* Enable Transceiver */
+            line-name = "sel1";
+        };
+    };
+
+    fusb302: typec-portc@22 {
+        compatible = "fcs,fusb302";
+        reg = <0x22>;
+        fcs,int_n = <&gpio 78 8>;
+        fcs,cc = <&gpio 79 0>;
+        fcs,power_en = <&gpio 25 0>;
+        vbus-supply = <&vbus_reg>;
+        status = "okay";
+    };
+
+    som_eeprom: eeprom@52 {
+        compatible = "atmel,24mac402";
+        reg = <0x52>;
+        pagesize = <16>;
+        address-width = <8>;
+        size = <256>;
+    };
+
+    /* SOM clock synthesizer */
+    som_clk: clock@6a {
+        compatible = "silabs,si5341";
+        reg = <0x6a>;
+        status = "okay";
+    };
+
+    /* Carrier-board clock synthesizer feeding FMC (misc_clk1) */
+    fmc_clk: clock@76 {
+        compatible = "silabs,si5341";
+        reg = <0x76>;
+        status = "okay";
+    };
 };
 &pcie {
 	misc = <&gpio 83 8>;
