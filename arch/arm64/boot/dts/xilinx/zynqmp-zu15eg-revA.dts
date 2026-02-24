@@ -245,17 +245,12 @@ aliases {
 		vbus-supply = <&vbus_reg>;
 		status = "okay";
 	};
-	som_eeprom: eeprom@53 {
+	som_eeprom: eeprom@52 {
 		compatible = "atmel,24mac402";
-		reg = <0x53>;
+		reg = <0x52>;
 		pagesize = <16>;
 		address-width = <8>;		
 		size = <256>;	
-	};
-	fmc1_conn:fmc@0x52{
-		#address-cells = <1>;
-		#size-cells = <0>;
-		reg = <0x52>;	
 	};
 	
 };
