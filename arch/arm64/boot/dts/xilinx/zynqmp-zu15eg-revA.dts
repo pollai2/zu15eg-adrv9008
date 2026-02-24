@@ -18,7 +18,10 @@ aliases {
 		nvmem0 = &som_eeprom;
 		rtc0 = &rtc;
 		usb0 = &fusb302;
-        fmcconn = &fmc1_conn;
+        clk_som= &som_clk;
+        clk_fmc=&fmc_clk;
+
+       
 	};
 	chosen {
 		bootargs = "earlycon";
