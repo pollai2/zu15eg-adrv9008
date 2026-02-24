@@ -254,6 +254,7 @@ aliases {
 
     som_eeprom: eeprom@52 {
         compatible = "atmel,24mac402";
+        status = "okay";
         reg = <0x52>;
         pagesize = <16>;
         address-width = <8>;
