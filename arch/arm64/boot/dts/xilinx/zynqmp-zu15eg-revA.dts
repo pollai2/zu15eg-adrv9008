@@ -18,8 +18,6 @@ aliases {
 		nvmem0 = &som_eeprom;
 		rtc0 = &rtc;
 		usb0 = &fusb302;
-        clk_som= &som_clk;
-        clk_fmc=&fmc_clk;
 
        
 	};
@@ -148,12 +146,7 @@ aliases {
 	};
 };
 &spi0 {
-	spinode: spidev@0x0 {
-		compatible = "rohm,dh2228fv";
-		status = "disabled";
-		reg = <0>;
-		spi-max-frequency = <100000000>;
-	};
+   
 };
 &can0 {
 	pwdn-gpio = <&gpio 80 0>;
@@ -195,11 +188,7 @@ aliases {
 		interrupts = <82 8>;
 	};
 };
-	ref48: ref48M {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <48000000>;
- 	};
+
 &i2c0 {
     #address-cells = <1>;
 	#size-cells = <0>;
@@ -268,80 +257,7 @@ aliases {
         size = <256>;
     };
  
-    si5341_som: clock-generator@6a {
-		compatible = "silabs,si5341";
-        status = "okay";
-		reg = <0x6a>;
-		#clock-cells = <2>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		clocks = <&ref48>;
-		clock-names = "xtal";
-		clock-output-names = "si5341-som";
-
-		/* PS-GTR clocks */
-		si5341_som_0: out@0 {
-			/* refclk0 for PS-GT, used for DP */
-			reg = <0>;
-			always-on;
-		};
-
-		si5341_som_2: out@2 {
-			/* refclk2 for PS-GT, used for USB3 */
-			reg = <2>;
-			always-on;
-		};
-
-		si5341_som_3: out@3 {
-			/* refclk3 for PS-GT, used for SATA */
-			reg = <3>;
-			always-on;
-		};
-
-		si5341_som_4: out@4 {
-			/* refclk4 for PS-GT, used for PCIe slot */
-			reg = <4>;
-			always-on;
-		};
-
-		si5341_som_5: out@5 {
-			reg = <5>;
-			always-on;
-		};
-	};
-
-	/* Carrier board clock synthesizer (FMC + PCIe side) */
-	si5341_fmc: clock-generator@76 {
-		compatible = "silabs,si5341";
-        status = "okay";
-		reg = <0x76>;
-		#clock-cells = <2>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		clocks = <&ref48>;
-		clock-names = "xtal";
-		clock-output-names = "si5341-fmc";
-
-		/* PL / FMC GTH clocks */
-		si5341_fmc_6: out@6 {
-			/* refclk6 PL CLK125 */
-			reg = <6>;
-			always-on;
-		};
-
-		si5341_fmc_7: out@7 {
-			/* refclk7 PL CLK74 */
-			reg = <7>;
-			always-on;
-		};
-        si5341_fmc_8: out@8 {
-			reg = <8>;
-			always-on;
-		};
-
-	};
+  
 
 };
 &pcie {
@@ -377,8 +293,7 @@ aliases {
 	status = "disabled";
 };
 &psgtr {
-	status = "okay";
-	clocks = <&si5341 0 5>, <&si5341 0 3>, <&si5341 0 2>, <&si5341 0 0>;
-	clock-names = "ref0", "ref1", "ref2", "ref3";
+	clocks =  <&refclk_dp>;
+	clock-names = "ref1";
 };
 
