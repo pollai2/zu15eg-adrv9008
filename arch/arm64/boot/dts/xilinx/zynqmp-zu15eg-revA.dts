@@ -145,9 +145,7 @@ aliases {
 		compatible = "iwave,iwg65m-info";
 	};
 };
-&spi0 {
-   status = "okay";
-};
+
 &can0 {
 	pwdn-gpio = <&gpio 80 0>;
 };
