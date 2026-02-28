@@ -31,7 +31,7 @@
 			#dma-cells = <1>;
 			#clock-cells = <0>;
 			dma-coherent;
-			interrupts = <0 109 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <0 92 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&zynqmp_clk 73>;
 		};
 
@@ -49,7 +49,7 @@
 			compatible = "adi,axi-jesd204-rx-1.0";
 			reg = <0xa0080000 0x1000>;
 
-			interrupts = <0 106 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <0 90 IRQ_TYPE_LEVEL_HIGH>;
 
 			clocks = <&zynqmp_clk 71>, <&axi_rx_clkgen>, <&axi_adrv9009_adxcvr_rx 0>;
 			clock-names = "s_axi_aclk", "device_clk", "lane_clk";
