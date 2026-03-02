@@ -12,6 +12,8 @@
  * Copyright (C) 2019 Analog Devices Inc.
  */
 #include "zynqmp-zu15eg-revA.dts"
+#include "pl.dtsi"
+#include "pcw.dtsi"
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/jesd204/adxcvr.h>
 
