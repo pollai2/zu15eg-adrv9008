@@ -37,9 +37,9 @@
 			clocks = <&zynqmp_clk 73>;
 		};
 
-		axi_adrv9009_core_rx: axi-adrv9009-rx-hpc@a0060000 {
+		axi_adrv9009_core_rx: axi-adrv9009-rx-hpc@a0050000 {
 			compatible = "adi,axi-adrv9009-rx-1.0";
-			reg = <0xa0060000 0x2000>;
+			reg = <0xa0050000 0x2000>;
 			dmas = <&rx_dma 0>;
 			dma-names = "rx";
 			spibus-connected = <&trx0_adrv9009>;
@@ -63,20 +63,20 @@
 			adi,frames-per-multiframe = <32>;
 		};
 
-		axi_rx_clkgen: clock-controller@a0020000 {
+		axi_rx_clkgen: clock-controller@a0040000 {
 			compatible = "adi,axi-clkgen-2.00.a";
-			reg = <0xa0020000 0x10000>;
+			reg = <0xa0040000 0x10000>;
 			#clock-cells = <0>;
 			clocks = <&clk0_ad9528 1>, <&zynqmp_clk 71>;
 			clock-names = "clkin1", "s_axi_aclk";
 			clock-output-names = "axi_rx_clkgen";
 		};
 
-		axi_adrv9009_adxcvr_rx: axi-adxcvr-rx@a0090000 {
+		axi_adrv9009_adxcvr_rx: axi-adxcvr-rx@a00a0000 {
 			#address-cells = <1>;
 			#size-cells = <0>;
 			compatible = "adi,axi-adxcvr-1.0";
-			reg = <0xa0090000 0x1000>;
+			reg = <0xa00a0000 0x1000>;
 
 			clocks = <&clk0_ad9528 1>, <&axi_rx_clkgen 0>;
 			clock-names = "conv", "div40";
@@ -89,9 +89,9 @@
 			adi,use-lpm-enable;
 		};
 
-		axi_sysid_0: axi-sysid-0@a0050000 {
-			compatible = "adi,axi-sysid-1.00.a";
-			reg = <0xa0050000 0x10000>;
+		axi_sysid_0: axi-sysid-0@a0020000 {
+			compatible = "adi,axi-sysid-1.0";
+			reg = <0xa0020000 0x10000>;
 		};
 	};
 };
