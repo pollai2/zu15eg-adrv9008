@@ -25,7 +25,11 @@ aliases {
 		bootargs = "earlycon";
 		stdout-path = "serial0:115200n8";
 	};
-	
+	memory@0 {
+        device_type = "memory";
+        reg = <0x0 0x00000000 0x0 0x7ff00000>, /* First 2GB */
+              <0x8 0x00000000 0x0 0x80000000>; /* Second 2GB at high address */
+    };
 	regulators {
 		compatible = "simple-bus";
 		#address-cells = <1>;
