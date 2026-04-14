@@ -113,6 +113,8 @@ static int aie_dev_get_mod_id(struct aie_device *adev,
 
 	if (ttype == AIE_TILE_TYPE_TILE)
 		ret = AIE_MOD_ID(TILE, mod);
+	else if (ttype == AIE_TILE_TYPE_MEMORY)
+		ret = AIE_MOD_ID(MEMORY, mod);
 	else if (ttype == AIE_TILE_TYPE_SHIMPL)
 		ret = AIE_MOD_ID(SHIMPL, mod);
 	else
@@ -209,7 +211,7 @@ struct aie_rsc_stat *aie_part_get_rsc_bitmaps(struct aie_partition *apart,
 					      enum aie_module_type mod,
 					      enum aie_rsc_type rtype)
 {
-	u32 ttype = apart->adev->ops->get_tile_type(&loc);
+	u32 ttype = apart->adev->ops->get_tile_type(apart->adev, &loc);
 
 	return aie_part_get_ttype_rsc_bitmaps(apart, ttype, mod, rtype);
 }
@@ -230,7 +232,7 @@ int aie_part_get_mod_num_rscs(struct aie_partition *apart,
 			      enum aie_module_type mod,
 			      enum aie_rsc_type rtype)
 {
-	u32 ttype = apart->adev->ops->get_tile_type(&loc);
+	u32 ttype = apart->adev->ops->get_tile_type(apart->adev, &loc);
 	const struct aie_mod_rsc_attr *mattr;
 
 	mattr = aie_dev_get_mod_rsc_attr(apart->adev, ttype, mod, rtype);
@@ -264,7 +266,7 @@ int aie_part_get_rsc_startbit(struct aie_partition *apart,
 	int num_rows;
 	struct aie_tile_attr *tattr;
 
-	ttype = adev->ops->get_tile_type(&loc);
+	ttype = adev->ops->get_tile_type(adev, &loc);
 
 	mattr = aie_dev_get_mod_rsc_attr(adev, ttype, mod, rtype);
 	if (!mattr)
@@ -279,7 +281,7 @@ int aie_part_get_rsc_startbit(struct aie_partition *apart,
 
 /**
  * aie_part_adjust_loc - adjust relative tile location to partition to
- *				absolute location in AI engine device
+ *			 absolute location in AI engine device
  * @apart: AI engine partition
  * @rloc: relative location in AI engine partition
  * @loc: returns absolute location in AI engine device
@@ -289,16 +291,16 @@ static
 int aie_part_adjust_loc(struct aie_partition *apart,
 			struct aie_location rloc, struct aie_location *loc)
 {
-	loc->col = rloc.col + apart->range.start.col;
-	loc->row = rloc.row + apart->range.start.row;
-
-	if (aie_validate_location(apart, *loc) < 0) {
+	if (aie_validate_location(apart, rloc) < 0) {
 		dev_err(&apart->dev,
 			"invalid loc (%u,%u) in (%u,%u).\n",
 			rloc.col, rloc.row,
 			apart->range.size.col, apart->range.size.row);
 		return -EINVAL;
 	}
+
+	loc->col = rloc.col + apart->range.start.col;
+	loc->row = rloc.row + apart->range.start.row;
 
 	return 0;
 }
@@ -450,6 +452,7 @@ void aie_part_rscmgr_finish(struct aie_partition *apart)
 
 				aie_resource_uninitialize(&rscs_stat->rbits);
 				aie_resource_uninitialize(&rscs_stat->sbits);
+				kfree(rscs_stat);
 			}
 
 			kfree(mod_rscs);
@@ -910,7 +913,7 @@ static int aie_part_rscmgr_get_ungated_bc_mods(struct aie_partition *apart,
 
 			l.col = apart->range.start.col + c;
 			l.row = r;
-			ttype = adev->ops->get_tile_type(&l);
+			ttype = adev->ops->get_tile_type(adev, &l);
 			tattr = &adev->ttype_attr[ttype];
 			rattr = &tattr->rscs_attr[rtype];
 			for (m = 0; m < tattr->num_mods; m++) {
@@ -1109,7 +1112,7 @@ static int aie_part_rscmgr_check_rscs_modules(struct aie_partition *apart,
 	for (i = 0; i < num_rscs; i++) {
 		struct aie_location l;
 
-		l.col = apart->range.start.col + rscs[i].loc.col;
+		l.col = rscs[i].loc.col;
 		l.row = rscs[i].loc.row;
 		/* validate tile location */
 		if (aie_validate_location(apart, l)) {
@@ -1119,8 +1122,9 @@ static int aie_part_rscmgr_check_rscs_modules(struct aie_partition *apart,
 			return -EINVAL;
 		}
 
+		l.col += apart->range.start.col;
 		/* validate module */
-		if (aie_dev_get_mod_id(adev, adev->ops->get_tile_type(&l),
+		if (aie_dev_get_mod_id(adev, adev->ops->get_tile_type(adev, &l),
 				       rscs[i].mod) < 0) {
 			dev_err(&apart->dev,
 				"failed resource check, tile(%u,%u) mod %u invalid.\n",

@@ -268,7 +268,6 @@ struct ad9528_outputs {
 
 struct ad9528_state {
 	struct spi_device		*spi;
-	struct regulator		*reg;
 	struct ad9528_platform_data	*pdata;
 	struct ad9528_outputs		output[AD9528_NUM_CHAN];
 	struct iio_chan_spec		ad9528_channels[AD9528_NUM_CHAN];
@@ -866,7 +865,7 @@ static struct clk *ad9528_clk_register(struct iio_dev *indio_dev, unsigned num,
 	output->is_enabled = is_enabled;
 
 	/* register the clock */
-	clk = clk_register(&st->spi->dev, &output->hw);
+	clk = devm_clk_register(&st->spi->dev, &output->hw);
 	st->clk_data.clks[num] = clk;
 
 	return clk;
@@ -1604,21 +1603,39 @@ static struct ad9528_platform_data *ad9528_parse_dt(struct device *dev)
 
 	cnt = 0;
 	for_each_child_of_node(np, chan_np) {
-		of_property_read_u32(chan_np, "reg",
+		ret = of_property_read_u32(chan_np, "reg",
 				     &pdata->channels[cnt].channel_num);
+		if (ret) {
+			dev_err(dev, "missing reg property in channel node\n");
+			return NULL;
+		}
 		pdata->channels[cnt].sync_ignore_en = of_property_read_bool(
 				chan_np, "adi,sync-ignore-enable");
 		pdata->channels[cnt].output_dis =
 			of_property_read_bool(chan_np, "adi,output-dis");
 
-		of_property_read_u32(chan_np, "adi,driver-mode", &tmp);
+		tmp = DRIVER_MODE_LVDS;
+		ret = of_property_read_u32(chan_np, "adi,driver-mode", &tmp);
 		pdata->channels[cnt].driver_mode = tmp;
+		if (ret && !pdata->channels[cnt].output_dis)
+			dev_warn(dev, "adi,driver-mode not set - apply default to DRIVER_MODE_LVDS\n");
+
+		tmp = 0;
 		of_property_read_u32(chan_np, "adi,divider-phase", &tmp);
 		pdata->channels[cnt].divider_phase = tmp;
-		of_property_read_u32(chan_np, "adi,channel-divider", &tmp);
+
+		tmp = 1;
+		ret = of_property_read_u32(chan_np, "adi,channel-divider", &tmp);
 		pdata->channels[cnt].channel_divider = tmp;
-		of_property_read_u32(chan_np, "adi,signal-source", &tmp);
+		if (ret && !pdata->channels[cnt].output_dis)
+			dev_warn(dev, "adi,channel-divider not set - apply default to 1\n");
+
+		tmp = SOURCE_VCO;
+		ret = of_property_read_u32(chan_np, "adi,signal-source", &tmp);
 		pdata->channels[cnt].signal_source = tmp;
+		if (ret && !pdata->channels[cnt].output_dis)
+			dev_warn(dev, "adi,signal-source not set - apply default to SOURCE_VCO\n");
+
 		ret = of_property_read_string(
 				chan_np, "adi,extended-name", &str);
 		if (ret >= 0)
@@ -1638,13 +1655,6 @@ struct ad9528_platform_data *ad9528_parse_dt(struct device *dev)
 }
 #endif
 
-static void ad9528_reg_disable(void *data)
-{
-	struct regulator *reg = data;
-
-	regulator_disable(reg);
-}
-
 static int ad9528_probe(struct spi_device *spi)
 {
 	struct ad9528_platform_data *pdata;
@@ -1658,6 +1668,11 @@ static int ad9528_probe(struct spi_device *spi)
 	clk = devm_clk_get(&spi->dev, NULL);
 	if (PTR_ERR(clk) == -EPROBE_DEFER)
 		return -EPROBE_DEFER;
+
+	ret = devm_regulator_get_enable(&spi->dev, "vcc");
+	if (ret)
+		return dev_err_probe(&spi->dev, ret,
+				     "Failed to get vcc regulator");
 
 	if (spi->dev.of_node)
 		pdata = ad9528_parse_dt(&spi->dev);
@@ -1680,18 +1695,6 @@ static int ad9528_probe(struct spi_device *spi)
 		return PTR_ERR(st->jdev);
 
 	mutex_init(&st->lock);
-
-	st->reg = devm_regulator_get(&spi->dev, "vcc");
-	if (!IS_ERR(st->reg)) {
-		ret = regulator_enable(st->reg);
-		if (ret)
-			return ret;
-
-		ret = devm_add_action_or_reset(&spi->dev, ad9528_reg_disable,
-					       st->reg);
-		if (ret)
-			return ret;
-	}
 
 	st->sysref_req_gpio = devm_gpiod_get_optional(&spi->dev, "sysref-req",
 					GPIOD_OUT_LOW);

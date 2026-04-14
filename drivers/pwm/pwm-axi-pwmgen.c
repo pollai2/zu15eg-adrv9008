@@ -14,23 +14,35 @@
 #include <linux/pwm.h>
 #include <linux/slab.h>
 
+#define AXI_PWMGEN_VERSION_MAJOR(x)	(((x) >> 16) & 0xff)
+#define AXI_PWMGEN_VERSION_MINOR(x)	(((x) >> 8) & 0xff)
+#define AXI_PWMGEN_VERSION_PATCH(x)	((x) & 0xff)
+
 #define AXI_PWMGEN_REG_CORE_VERSION	0x00
 #define AXI_PWMGEN_REG_ID		0x04
 #define AXI_PWMGEN_REG_SCRATCHPAD	0x08
 #define AXI_PWMGEN_REG_CORE_MAGIC	0x0C
 #define AXI_PWMGEN_REG_CONFIG		0x10
 #define AXI_PWMGEN_REG_NPWM		0x14
-#define AXI_PWMGEN_CH_PERIOD_BASE	0x40
-#define AXI_PWMGEN_CH_DUTY_BASE		0x44
-#define AXI_PWMGEN_CH_PHASE_BASE	0x48
-#define AXI_PWMGEN_CHX_PERIOD(ch)	(AXI_PWMGEN_CH_PERIOD_BASE + (12 * (ch)))
-#define AXI_PWMGEN_CHX_DUTY(ch)		(AXI_PWMGEN_CH_DUTY_BASE + (12 * (ch)))
-#define AXI_PWMGEN_CHX_PHASE(ch)	(AXI_PWMGEN_CH_PHASE_BASE + (12 * (ch)))
+/* register layout is a bit different between v1 and v2 HDL */
+#define AXI_PWMGEN_V1_CHX_PERIOD(ch)	(0x40 + 12 * (ch))
+#define AXI_PWMGEN_V1_CHX_DUTY(ch)	(0x44 + 12 * (ch))
+#define AXI_PWMGEN_V1_CHX_PHASE(ch)	(0x48 + 12 * (ch))
+#define AXI_PWMGEN_V2_CHX_PERIOD(ch)	(0x40 + 4 * (ch))
+#define AXI_PWMGEN_V2_CHX_DUTY(ch)	(0x80 + 4 * (ch))
+#define AXI_PWMGEN_V2_CHX_PHASE(ch)	(0xC0 + 4 * (ch))
+#define AXI_PWMGEN_CHX_PERIOD(p, ch) \
+	((p)->hw_maj_ver == 1 ? AXI_PWMGEN_V1_CHX_PERIOD(ch) : AXI_PWMGEN_V2_CHX_PERIOD(ch))
+#define AXI_PWMGEN_CHX_DUTY(p, ch) \
+	((p)->hw_maj_ver == 1 ? AXI_PWMGEN_V1_CHX_DUTY(ch) : AXI_PWMGEN_V2_CHX_DUTY(ch))
+#define AXI_PWMGEN_CHX_PHASE(p, ch) \
+	((p)->hw_maj_ver == 1 ? AXI_PWMGEN_V1_CHX_PHASE(ch) : AXI_PWMGEN_V2_CHX_PHASE(ch))
 #define AXI_PWMGEN_TEST_DATA		0x5A0F0081
 #define AXI_PWMGEN_LOAD_CONIG		BIT(1)
 #define AXI_PWMGEN_RESET		BIT(0)
 
 #define AXI_PWMGEN_PSEC_PER_SEC		1000000000000ULL
+#define AXI_PWMGEN_N_MAX_PWMS		16
 
 static const unsigned long long axi_pwmgen_scales[] = {
 	[PWM_UNIT_SEC]  = 1000000000000ULL,
@@ -44,9 +56,10 @@ struct axi_pwmgen {
 	struct pwm_chip		chip;
 	struct clk		*clk;
 	void __iomem		*base;
+	u8			hw_maj_ver;
 
 	/* Used to store the period when the channel is disabled */
-	unsigned int		ch_period[4];
+	unsigned int		ch_period[AXI_PWMGEN_N_MAX_PWMS];
 };
 
 static inline unsigned int axi_pwmgen_read(struct axi_pwmgen *pwm,
@@ -92,16 +105,16 @@ static int axi_pwmgen_apply(struct pwm_chip *chip, struct pwm_device *device,
 	target = state->period * axi_pwmgen_scales[state->time_unit];
 	cnt = target ? DIV_ROUND_CLOSEST_ULL(target, clk_period_ps) : 0;
 	pwm->ch_period[ch] = cnt;
-	axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_PERIOD(ch),
+	axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_PERIOD(pwm, ch),
 			 state->enabled ? pwm->ch_period[ch] : 0);
 
 	target = state->duty_cycle * axi_pwmgen_scales[state->time_unit];
 	cnt = target ? DIV_ROUND_CLOSEST_ULL(target, clk_period_ps) : 0;
-	axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_DUTY(ch), cnt);
+	axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_DUTY(pwm, ch), cnt);
 
 	target = state->phase * axi_pwmgen_scales[state->time_unit];
 	cnt = target ? DIV_ROUND_CLOSEST_ULL(target, clk_period_ps) : 0;
-	axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_PHASE(ch), cnt);
+	axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_PHASE(pwm, ch), cnt);
 
 	/* Apply the new config */
 	axi_pwmgen_write(pwm, AXI_PWMGEN_REG_CONFIG, AXI_PWMGEN_LOAD_CONIG);
@@ -123,21 +136,21 @@ static int axi_pwmgen_capture(struct pwm_chip *chip, struct pwm_device *device,
 		return -EINVAL;
 
 	clk_period_ps = DIV_ROUND_CLOSEST_ULL(AXI_PWMGEN_PSEC_PER_SEC, rate);
-	cnt = axi_pwmgen_read(pwmgen, AXI_PWMGEN_CHX_PERIOD(ch));
+	cnt = axi_pwmgen_read(pwmgen, AXI_PWMGEN_CHX_PERIOD(pwmgen, ch));
 	cnt *= clk_period_ps;
 	if (cnt)
 		capture->period = DIV_ROUND_CLOSEST_ULL(cnt,
 				axi_pwmgen_scales[device->state.time_unit]);
 	else
 		capture->period = 0;
-	cnt = axi_pwmgen_read(pwmgen, AXI_PWMGEN_CHX_DUTY(ch));
+	cnt = axi_pwmgen_read(pwmgen, AXI_PWMGEN_CHX_DUTY(pwmgen, ch));
 	cnt *= clk_period_ps;
 	if (cnt)
 		capture->duty_cycle = DIV_ROUND_CLOSEST_ULL(cnt,
 				axi_pwmgen_scales[device->state.time_unit]);
 	else
 		capture->duty_cycle = 0;
-	cnt = axi_pwmgen_read(pwmgen, AXI_PWMGEN_CHX_PHASE(ch));
+	cnt = axi_pwmgen_read(pwmgen, AXI_PWMGEN_CHX_PHASE(pwmgen, ch));
 	cnt *= clk_period_ps;
 	if (cnt)
 		capture->phase = DIV_ROUND_CLOSEST_ULL(cnt,
@@ -149,47 +162,27 @@ static int axi_pwmgen_capture(struct pwm_chip *chip, struct pwm_device *device,
 	return 0;
 }
 
-static void axi_pwmgen_get_state(struct pwm_chip *chip, struct pwm_device *pwm,
-				 struct pwm_state *state)
+static int axi_pwmgen_get_state(struct pwm_chip *chip, struct pwm_device *pwm,
+				struct pwm_state *state)
 {
 	struct pwm_capture capture;
 	int ret;
 
 	ret = axi_pwmgen_capture(chip, pwm, &capture, 0);
 	if (ret < 0)
-		return;
+		return ret;
 
 	state->enabled = state;
 	state->period = capture.period;
 	state->duty_cycle = capture.duty_cycle;
 	state->phase = capture.phase;
 	state->time_unit = capture.time_unit;
-}
-
-static void axi_pwmgen_disable(struct pwm_chip *chip, struct pwm_device *pwm)
-{
-	unsigned int ch = pwm->hwpwm;
-	struct axi_pwmgen *pwmgen = to_axi_pwmgen(chip);
-
-	axi_pwmgen_write(pwmgen, AXI_PWMGEN_CHX_PERIOD(ch), 0);
-	axi_pwmgen_write(pwmgen, AXI_PWMGEN_REG_CONFIG, AXI_PWMGEN_LOAD_CONIG);
-}
-
-static int axi_pwmgen_enable(struct pwm_chip *chip, struct pwm_device *pwm)
-{
-	unsigned int ch = pwm->hwpwm;
-	struct axi_pwmgen *pwmgen = to_axi_pwmgen(chip);
-
-	axi_pwmgen_write(pwmgen, AXI_PWMGEN_CHX_PERIOD(ch), pwmgen->ch_period[ch]);
-	axi_pwmgen_write(pwmgen, AXI_PWMGEN_REG_CONFIG, AXI_PWMGEN_LOAD_CONIG);
 
 	return 0;
 }
 
 static const struct pwm_ops axi_pwmgen_pwm_ops = {
 	.apply = axi_pwmgen_apply,
-	.disable = axi_pwmgen_disable,
-	.enable = axi_pwmgen_enable,
 	.capture = axi_pwmgen_capture,
 	.get_state = axi_pwmgen_get_state,
 	.owner = THIS_MODULE,
@@ -217,15 +210,26 @@ static int axi_pwmgen_setup(struct pwm_chip *chip)
 		return -EIO;
 	}
 
+	reg = axi_pwmgen_read(pwm, AXI_PWMGEN_REG_CORE_VERSION);
+	pwm->hw_maj_ver = AXI_PWMGEN_VERSION_MAJOR(reg);
+
+	if (pwm->hw_maj_ver != 1 && pwm->hw_maj_ver != 2) {
+		dev_err(chip->dev, "Unsupported peripheral version %u.%u.%u\n",
+			AXI_PWMGEN_VERSION_MAJOR(reg),
+			AXI_PWMGEN_VERSION_MINOR(reg),
+			AXI_PWMGEN_VERSION_PATCH(reg));
+		return -ENODEV;
+	}
+
 	pwm->chip.npwm = axi_pwmgen_read(pwm, AXI_PWMGEN_REG_NPWM);
-	if (pwm->chip.npwm > 4)
+	if (pwm->chip.npwm > AXI_PWMGEN_N_MAX_PWMS)
 		return -EINVAL;
 
 	/* Disable all the outputs */
 	for (idx = 0; idx < pwm->chip.npwm; idx++) {
-		axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_PERIOD(idx), 0);
-		axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_DUTY(idx), 0);
-		axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_PHASE(idx), 0);
+		axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_PERIOD(pwm, idx), 0);
+		axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_DUTY(pwm, idx), 0);
+		axi_pwmgen_write(pwm, AXI_PWMGEN_CHX_PHASE(pwm, idx), 0);
 	}
 
 	/* Enable the core */
@@ -274,28 +278,15 @@ static int axi_pwmgen_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = pwmchip_add(&pwm->chip);
-	if (ret)
-		return ret;
-
-	platform_set_drvdata(pdev, pwm);
-
-	return 0;
+	return devm_pwmchip_add(&pdev->dev, &pwm->chip);
 }
 
-static int axi_pwmgen_remove(struct platform_device *pdev)
-{
-	struct axi_pwmgen *pwm = platform_get_drvdata(pdev);
-
-	return pwmchip_remove(&pwm->chip);
-}
 static struct platform_driver axi_pwmgen_driver = {
 	.driver = {
 		.name = "adi,axi-pwmgen",
 		.of_match_table = axi_pwmgen_ids,
 	},
 	.probe = axi_pwmgen_probe,
-	.remove = axi_pwmgen_remove,
 };
 
 module_platform_driver(axi_pwmgen_driver);

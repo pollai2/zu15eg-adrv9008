@@ -63,12 +63,7 @@ struct thread_struct {
 	.pgdir = swapper_pg_dir, \
 }
 
-/* Free all resources held by a thread. */
-static inline void release_thread(struct task_struct *dead_task)
-{
-}
-
-unsigned long get_wchan(struct task_struct *p);
+unsigned long __get_wchan(struct task_struct *p);
 
 /* The size allocated for kernel stacks. This _must_ be a power of two! */
 # define KERNEL_STACK_SIZE	0x2000
@@ -85,9 +80,6 @@ unsigned long get_wchan(struct task_struct *p);
 /* Grotty old names for some.  */
 #  define KSTK_EIP(task)	(task_pc(task))
 #  define KSTK_ESP(task)	(task_sp(task))
-
-/* FIXME */
-#  define deactivate_mm(tsk, mm)	do { } while (0)
 
 #  define STACK_TOP	TASK_SIZE
 #  define STACK_TOP_MAX	STACK_TOP

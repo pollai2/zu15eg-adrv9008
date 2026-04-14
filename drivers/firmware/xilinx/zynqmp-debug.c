@@ -60,8 +60,6 @@ static struct pm_api_info pm_api_list[] = {
 	PM_API(PM_CLOCK_GETSTATE),
 	PM_API(PM_CLOCK_SETDIVIDER),
 	PM_API(PM_CLOCK_GETDIVIDER),
-	PM_API(PM_CLOCK_SETRATE),
-	PM_API(PM_CLOCK_GETRATE),
 	PM_API(PM_CLOCK_SETPARENT),
 	PM_API(PM_CLOCK_GETPARENT),
 	PM_API(PM_QUERY_DATA),
@@ -83,7 +81,7 @@ static int zynqmp_pm_self_suspend(const u32 node, const u32 latency,
 				  const u32 state)
 {
 	return zynqmp_pm_invoke_fn(PM_SELF_SUSPEND, node, latency,
-				   state, 0, NULL);
+				   state, 0, 0, NULL);
 }
 
 /**
@@ -95,7 +93,8 @@ static int zynqmp_pm_self_suspend(const u32 node, const u32 latency,
  */
 static int zynqmp_pm_abort_suspend(const enum zynqmp_pm_abort_reason reason)
 {
-	return zynqmp_pm_invoke_fn(PM_ABORT_SUSPEND, reason, 0, 0, 0, NULL);
+	return zynqmp_pm_invoke_fn(PM_ABORT_SUSPEND, reason, 0, 0, 0, 0,
+				   NULL);
 }
 
 /**
@@ -104,14 +103,16 @@ static int zynqmp_pm_abort_suspend(const enum zynqmp_pm_abort_reason reason)
  * @ioctl:	ID of the requested IOCTL
  * @arg1:	Argument 1 of requested IOCTL call
  * @arg2:	Argument 2 of requested IOCTL call
+ * @arg3:	Argument 3 of requested IOCTL call
  * @out:	Returned output value
  *
  * Return:	Returns status, either success or error+reason
  */
 static int zynqmp_pm_ioctl(const u32 node, const u32 ioctl, const u32 arg1,
-			   const u32 arg2, u32 *out)
+			   const u32 arg2, const u32 arg3, u32 *out)
 {
-	return zynqmp_pm_invoke_fn(PM_IOCTL, node, ioctl, arg1, arg2, out);
+	return zynqmp_pm_invoke_fn(PM_IOCTL, node, ioctl, arg1, arg2, arg3,
+				   out);
 }
 
 /**
@@ -163,7 +164,6 @@ static int get_pm_api_id(char *pm_api_req, u32 *pm_id)
 static int process_api_request(u32 pm_id, u64 *pm_api_arg, u32 *pm_api_ret)
 {
 	u32 pm_api_version;
-	u64 rate;
 	int ret;
 	struct zynqmp_pm_query_data qdata = {0};
 
@@ -186,19 +186,19 @@ static int process_api_request(u32 pm_id, u64 *pm_api_arg, u32 *pm_api_ret)
 					     ZYNQMP_PM_MAX_LATENCY, 0);
 		break;
 	case PM_FORCE_POWERDOWN:
-		ret = zynqmp_pm_force_powerdown(pm_api_arg[0],
-						pm_api_arg[1] ? pm_api_arg[1] :
-						ZYNQMP_PM_REQUEST_ACK_NO);
+		ret = zynqmp_pm_force_pwrdwn(pm_api_arg[0],
+					     pm_api_arg[1] ? pm_api_arg[1] :
+					     ZYNQMP_PM_REQUEST_ACK_NO);
 		break;
 	case PM_ABORT_SUSPEND:
 		ret = zynqmp_pm_abort_suspend(pm_api_arg[0] ? pm_api_arg[0] :
 					      ZYNQMP_PM_ABORT_REASON_UNKNOWN);
 		break;
 	case PM_REQUEST_WAKEUP:
-		ret = zynqmp_pm_request_wakeup(pm_api_arg[0],
-					       pm_api_arg[1], pm_api_arg[2],
-					       pm_api_arg[3] ? pm_api_arg[3] :
-					       ZYNQMP_PM_REQUEST_ACK_NO);
+		ret = zynqmp_pm_request_wake(pm_api_arg[0],
+					     pm_api_arg[1], pm_api_arg[2],
+					     pm_api_arg[3] ? pm_api_arg[3] :
+					     ZYNQMP_PM_REQUEST_ACK_NO);
 		break;
 	case PM_SET_WAKEUP_SOURCE:
 		ret = zynqmp_pm_set_wakeup_source(pm_api_arg[0], pm_api_arg[1],
@@ -248,7 +248,7 @@ static int process_api_request(u32 pm_id, u64 *pm_api_arg, u32 *pm_api_ret)
 		break;
 	case PM_GET_OPERATING_CHARACTERISTIC:
 		ret = zynqmp_pm_get_operating_characteristic(pm_api_arg[0],
-				pm_api_arg[1] ? pm_api_arg[1] :
+							     pm_api_arg[1] ? pm_api_arg[1] :
 				ZYNQMP_PM_OPERATING_CHARACTERISTIC_POWER,
 				&pm_api_ret[0]);
 		if (!ret)
@@ -310,15 +310,19 @@ static int process_api_request(u32 pm_id, u64 *pm_api_arg, u32 *pm_api_ret)
 	case PM_IOCTL:
 		ret = zynqmp_pm_ioctl(pm_api_arg[0], pm_api_arg[1],
 				      pm_api_arg[2], pm_api_arg[3],
-				      &pm_api_ret[0]);
+				      pm_api_arg[4], &pm_api_ret[0]);
 		if (!ret && (pm_api_arg[1] == IOCTL_GET_RPU_OPER_MODE ||
 			     pm_api_arg[1] == IOCTL_GET_PLL_FRAC_MODE ||
 			     pm_api_arg[1] == IOCTL_GET_PLL_FRAC_DATA ||
 			     pm_api_arg[1] == IOCTL_READ_GGS ||
 			     pm_api_arg[1] == IOCTL_READ_PGGS ||
-			     pm_api_arg[1] == IOCTL_PROBE_COUNTER_READ))
+			     pm_api_arg[1] == IOCTL_PROBE_COUNTER_READ ||
+			     pm_api_arg[1] == IOCTL_READ_REG))
 			sprintf(debugfs_buf, "IOCTL return value: %u\n",
 				pm_api_ret[1]);
+		if (!ret && pm_api_arg[1] == IOCTL_GET_QOS)
+			sprintf(debugfs_buf, "Default QoS: %u\nCurrent QoS: %u\n",
+				pm_api_ret[1], pm_api_ret[2]);
 		break;
 	case PM_CLOCK_ENABLE:
 		ret = zynqmp_pm_clock_enable(pm_api_arg[0]);
@@ -340,14 +344,6 @@ static int process_api_request(u32 pm_id, u64 *pm_api_arg, u32 *pm_api_ret)
 		if (!ret)
 			sprintf(debugfs_buf, "Divider Value: %d\n",
 				pm_api_ret[0]);
-		break;
-	case PM_CLOCK_SETRATE:
-		ret = zynqmp_pm_clock_setrate(pm_api_arg[0], pm_api_arg[1]);
-		break;
-	case PM_CLOCK_GETRATE:
-		ret = zynqmp_pm_clock_getrate(pm_api_arg[0], &rate);
-		if (!ret)
-			sprintf(debugfs_buf, "Clock rate :%llu\n", rate);
 		break;
 	case PM_CLOCK_SETPARENT:
 		ret = zynqmp_pm_clock_setparent(pm_api_arg[0], pm_api_arg[1]);
@@ -421,7 +417,7 @@ static ssize_t zynqmp_pm_debugfs_api_write(struct file *file,
 	char *kern_buff, *tmp_buff;
 	char *pm_api_req;
 	u32 pm_id = 0;
-	u64 pm_api_arg[4] = {0, 0, 0, 0};
+	u64 pm_api_arg[5] = {0, 0, 0, 0, 0};
 	/* Return values from PM APIs calls */
 	u32 pm_api_ret[4] = {0, 0, 0, 0};
 

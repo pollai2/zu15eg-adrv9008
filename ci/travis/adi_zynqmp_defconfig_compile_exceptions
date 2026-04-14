@@ -8,9 +8,10 @@ sound/pci/ad1889.o
 sound/pci/hda/patch_analog.o
 sound/soc/codecs/wm8782.o
 drivers/gpu/drm/tegra/fb.o
-drivers/media/platform/imageon-bridge.o
+drivers/media/platform/adi/imageon-bridge.o
 drivers/media/i2c/adv7511-v4l2.o
 drivers/iio/adc/adi-axi-adc.o
+drivers/iio/industrialio-backend.o
 drivers/iio/adc/max1027.o
 drivers/input/misc/adxl34x.o
 drivers/input/misc/adxl34x-i2c.o
@@ -31,8 +32,8 @@ drivers/usb/gadget/function/f_uac1_legacy.o
 drivers/usb/gadget/function/u_uac1_legacy.o
 drivers/usb/gadget/legacy/audio.o
 drivers/usb/gadget/udc/net2272.o
-drivers/staging/comedi/drivers/rti800.o
-drivers/staging/comedi/drivers/rti802.o
+drivers/comedi/drivers/rti800.o
+drivers/comedi/drivers/rti802.o
 drivers/mtd/maps/gpio-addr-flash.o
 drivers/mtd/maps/latch-addr-flash.o
 drivers/iio/adc/ti-ads7950.o
@@ -48,3 +49,8 @@ drivers/gpio/gpio-adi-daq1.o
 drivers/iio/jesd204/axi_jesd204b_gt.o
 drivers/iio/jesd204/axi_jesd204b_v51.o
 drivers/iio/adc/adm1177.o
+drivers/iio/adc/madura/devices/adrv9025/private/src/adrv9025_dfe.o
+drivers/iio/adc/madura/devices/adrv9025/private/src/adrv9025_dynamic_slicer.o
+drivers/iio/adc/madura/devices/adrv9025/public/src/adi_adrv9025_dfe.o
+drivers/iio/adc/madura/devices/adrv9025/public/src/adi_adrv9025_dynamic_slicer.o
+drivers/iio/adc/madura/platforms/adi_platform.o

@@ -38,7 +38,9 @@
 // TX_JESD_S=2 \
 // TX_JESD_NP=12
 
-#include "zynqmp-zcu102-rev10-ad9081.dts"
+#include "zynqmp-zcu102-rev10-ad9081-default.dtsi"
+#include <dt-bindings/iio/frequency/hmc7044.h>
+#include <dt-bindings/iio/adc/adi,ad9081.h>
 
 / {
 	axi-jesd204-rx@0 {
@@ -130,6 +132,8 @@
 		adi,vcxo-frequency = <100000000>;
 
 		adi,pll1-loop-bandwidth-hz = <200>;
+		adi,pll1-charge-pump-current-ua = <720>;
+		adi,pfd1-maximum-limit-frequency-hz = <1000000>; /* 1 MHz */
 
 		adi,pll2-output-frequency = <2880000000>;
 

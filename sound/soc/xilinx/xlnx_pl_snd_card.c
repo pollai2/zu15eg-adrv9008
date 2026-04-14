@@ -226,7 +226,7 @@ SND_SOC_DAILINK_DEFS(xlnx_i2s_playback,
 
 SND_SOC_DAILINK_DEFS(xlnx_hdmi_tx,
 		     DAILINK_COMP_ARRAY(COMP_DUMMY()),
-		     DAILINK_COMP_ARRAY(COMP_CODEC("hdmi-audio-codec.0", "i2s-hifi")),
+		     DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "xlnx_hdmi_tx")),
 		     DAILINK_COMP_ARRAY(COMP_PLATFORM(NULL)));
 
 SND_SOC_DAILINK_DEFS(xlnx_hdmi_rx,
@@ -236,7 +236,7 @@ SND_SOC_DAILINK_DEFS(xlnx_hdmi_rx,
 
 SND_SOC_DAILINK_DEFS(xlnx_dp_tx,
 		     DAILINK_COMP_ARRAY(COMP_DUMMY()),
-		     DAILINK_COMP_ARRAY(COMP_CODEC("hdmi-audio-codec.0", "i2s-hifi")),
+		     DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "xlnx_dp_tx")),
 		     DAILINK_COMP_ARRAY(COMP_PLATFORM(NULL)));
 
 SND_SOC_DAILINK_DEFS(xlnx_dp_rx,
@@ -254,9 +254,14 @@ SND_SOC_DAILINK_DEFS(xlnx_sdi_rx,
 		     DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "xlnx_sdi_rx")),
 		     DAILINK_COMP_ARRAY(COMP_PLATFORM(NULL)));
 
-SND_SOC_DAILINK_DEFS(xlnx_spdif,
+SND_SOC_DAILINK_DEFS(xlnx_spdif_tx,
 		     DAILINK_COMP_ARRAY(COMP_DUMMY()),
+		     DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "xlnx_spdif_tx")),
+		     DAILINK_COMP_ARRAY(COMP_PLATFORM(NULL)));
+
+SND_SOC_DAILINK_DEFS(xlnx_spdif_rx,
 		     DAILINK_COMP_ARRAY(COMP_DUMMY()),
+		     DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "xlnx_spdif_rx")),
 		     DAILINK_COMP_ARRAY(COMP_PLATFORM(NULL)));
 
 static struct snd_soc_dai_link xlnx_snd_dai[][XLNX_MAX_PATHS] = {
@@ -277,6 +282,9 @@ static struct snd_soc_dai_link xlnx_snd_dai[][XLNX_MAX_PATHS] = {
 			.name = "xilinx-hdmi-playback",
 			SND_SOC_DAILINK_REG(xlnx_hdmi_tx),
 			.ops = &xlnx_hdmi_card_ops,
+			.dai_fmt = SND_SOC_DAIFMT_I2S |
+				   SND_SOC_DAIFMT_NB_NF |
+				   SND_SOC_DAIFMT_CBS_CFS,
 		},
 		{
 			.name = "xilinx-hdmi-capture",
@@ -297,12 +305,12 @@ static struct snd_soc_dai_link xlnx_snd_dai[][XLNX_MAX_PATHS] = {
 	[SPDIF_AUDIO] = {
 		{
 			.name = "xilinx-spdif_playback",
-			SND_SOC_DAILINK_REG(xlnx_spdif),
+			SND_SOC_DAILINK_REG(xlnx_spdif_tx),
 			.ops = &xlnx_spdif_card_ops,
 		},
 		{
 			.name = "xilinx-spdif_capture",
-			SND_SOC_DAILINK_REG(xlnx_spdif),
+			SND_SOC_DAILINK_REG(xlnx_spdif_rx),
 			.ops = &xlnx_spdif_card_ops,
 		},
 	},
@@ -311,6 +319,9 @@ static struct snd_soc_dai_link xlnx_snd_dai[][XLNX_MAX_PATHS] = {
 			.name = "xilinx-dp-playback",
 			SND_SOC_DAILINK_REG(xlnx_dp_tx),
 			.ops = &xlnx_dp_card_ops,
+			.dai_fmt = SND_SOC_DAIFMT_I2S |
+				   SND_SOC_DAIFMT_NB_NF |
+				   SND_SOC_DAIFMT_CBS_CFS,
 		},
 		{
 			.name = "xilinx-dp-capture",
@@ -405,7 +416,6 @@ static int xlnx_snd_probe(struct platform_device *pdev)
 			prv->mclk = devm_clk_get(&iface_pdev->dev, "aud_mclk");
 			if (IS_ERR(prv->mclk))
 				return PTR_ERR(prv->mclk);
-
 		}
 		of_node_put(pnode);
 
@@ -428,8 +438,7 @@ static int xlnx_snd_probe(struct platform_device *pdev)
 		case HDMI_AUDIO:
 			*dai = xlnx_snd_dai[HDMI_AUDIO][i];
 			dai->platforms->of_node = pnode;
-			if (i == XLNX_CAPTURE)
-				dai->codecs->of_node = node[i];
+			dai->codecs->of_node = node[i];
 			card->num_links++;
 			/* TODO: support multiple sampling rates */
 			prv->mclk_ratio = 384;
@@ -461,8 +470,7 @@ static int xlnx_snd_probe(struct platform_device *pdev)
 		case DP_AUDIO:
 			*dai = xlnx_snd_dai[DP_AUDIO][i];
 			dai->platforms->of_node = pnode;
-			if (i == XLNX_CAPTURE)
-				dai->codecs->of_node = node[i];
+			dai->codecs->of_node = node[i];
 			card->num_links++;
 			/* TODO: support multiple sampling rates */
 			prv->mclk_ratio = 512;

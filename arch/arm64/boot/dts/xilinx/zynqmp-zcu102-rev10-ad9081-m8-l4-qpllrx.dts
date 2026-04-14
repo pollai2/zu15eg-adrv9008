@@ -10,8 +10,10 @@
  * Copyright (C) 2019-2020 Analog Devices Inc.
  */
 
-#include "zynqmp-zcu102-rev10-ad9081.dts"
+#include "zynqmp-zcu102-rev10-ad9081-default.dtsi"
 #include <dt-bindings/jesd204/adxcvr.h>
+#include <dt-bindings/iio/frequency/hmc7044.h>
+#include <dt-bindings/iio/adc/adi,ad9081.h>
 
 /*
  * This is an alternative example device tree which uses QPLL for both adxcvr instances.
@@ -125,6 +127,8 @@
                 adi,pll1-ref-prio-ctrl = <0xE1>; /* prefer CLKIN1 -> CLKIN0 -> CLKIN2 -> CLKIN3 */
 
 		adi,pll1-loop-bandwidth-hz = <200>;
+		adi,pll1-charge-pump-current-ua = <720>;
+		adi,pfd1-maximum-limit-frequency-hz = <1000000>; /* 1 MHz */
 
 		adi,vcxo-frequency = <VCXO_FREQUENCY>;
 

@@ -309,6 +309,10 @@ static int __init xilinx_timer_init(struct device_node *timer)
 	bool clocksource = false;
 	bool clockevent = false;
 
+	/* If this property is present, the device is a PWM and not a timer */
+	if (of_property_read_bool(timer, "#pwm-cells"))
+		return 0;
+
 	ret = of_property_read_u32(timer, "cpu-id", (u32 *)&cpu_id);
 	if (!ret && NR_CPUS > 1) {
 		/* cpu_id will say if this is clocksource or clockevent */
@@ -324,12 +328,12 @@ static int __init xilinx_timer_init(struct device_node *timer)
 
 	if (clocksource) {
 		/* TODO Add support for clocksource from one timer only */
-		ret = of_property_read_u32(timer, "xlnx,one-timer-only", 
+		ret = of_property_read_u32(timer, "xlnx,one-timer-only",
 					   &timer_num);
 		if (ret) {
 			pr_err("%pOF: missing %s property\n",
 				timer, "xlnx,one-timer-only");
-			return -EINVAL;			
+			return -EINVAL;
 		}
 
 		if (timer_num) {

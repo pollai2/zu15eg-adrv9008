@@ -205,11 +205,11 @@ static int adrv9363x_box_card_dai_init(struct snd_soc_pcm_runtime *rtd)
 		return ret;
 
 	if (gpio_is_valid(priv->gpio_hp_det)) {
-		snd_soc_card_jack_new(rtd->card, "Headphones",
-				      SND_JACK_HEADPHONE,
-				      &simple_card_hp_jack,
-				      simple_card_hp_jack_pins,
-				      ARRAY_SIZE(simple_card_hp_jack_pins));
+		snd_soc_card_jack_new_pins(rtd->card, "Headphones",
+					   SND_JACK_HEADPHONE,
+					   &simple_card_hp_jack,
+					   simple_card_hp_jack_pins,
+					   ARRAY_SIZE(simple_card_hp_jack_pins));
 
 		simple_card_hp_jack_gpio.gpio = priv->gpio_hp_det;
 		simple_card_hp_jack_gpio.invert = priv->gpio_hp_det_invert;
@@ -218,11 +218,11 @@ static int adrv9363x_box_card_dai_init(struct snd_soc_pcm_runtime *rtd)
 	}
 
 	if (gpio_is_valid(priv->gpio_mic_det)) {
-		snd_soc_card_jack_new(rtd->card, "Mic Jack",
-				      SND_JACK_MICROPHONE,
-				      &simple_card_mic_jack,
-				      simple_card_mic_jack_pins,
-				      ARRAY_SIZE(simple_card_mic_jack_pins));
+		snd_soc_card_jack_new_pins(rtd->card, "Mic Jack",
+					   SND_JACK_MICROPHONE,
+					   &simple_card_mic_jack,
+					   simple_card_mic_jack_pins,
+					   ARRAY_SIZE(simple_card_mic_jack_pins));
 		simple_card_mic_jack_gpio.gpio = priv->gpio_mic_det;
 		simple_card_mic_jack_gpio.invert = priv->gpio_mic_det_invert;
 		snd_soc_jack_add_gpios(&simple_card_mic_jack, 1,
@@ -319,11 +319,10 @@ static int adrv9363x_box_card_parse_daifmt(struct device_node *node,
 	struct device_node *framemaster = NULL;
 	unsigned int daifmt;
 
-	daifmt = snd_soc_of_parse_daifmt(node, prefix,
-					 &bitclkmaster, &framemaster);
-	daifmt &= ~SND_SOC_DAIFMT_MASTER_MASK;
+	daifmt = snd_soc_daifmt_parse_format(node, prefix);
 
-	if (strlen(prefix) && !bitclkmaster && !framemaster) {
+	snd_soc_daifmt_parse_clock_provider_as_phandle(node, prefix, &bitclkmaster, &framemaster);
+	if (!bitclkmaster && !framemaster) {
 		/*
 		 * No dai-link level and master setting was not found from
 		 * sound node level, revert back to legacy DT parsing and
@@ -331,15 +330,11 @@ static int adrv9363x_box_card_parse_daifmt(struct device_node *node,
 		 */
 		dev_dbg(dev, "Revert to legacy daifmt parsing\n");
 
-		daifmt = snd_soc_of_parse_daifmt(codec, NULL, NULL, NULL) |
-			(daifmt & ~SND_SOC_DAIFMT_CLOCK_MASK);
+		daifmt |= snd_soc_daifmt_parse_clock_provider_as_flag(codec, NULL);
 	} else {
-		if (codec == bitclkmaster)
-			daifmt |= (codec == framemaster) ?
-				SND_SOC_DAIFMT_CBM_CFM : SND_SOC_DAIFMT_CBM_CFS;
-		else
-			daifmt |= (codec == framemaster) ?
-				SND_SOC_DAIFMT_CBS_CFM : SND_SOC_DAIFMT_CBS_CFS;
+		daifmt |= snd_soc_daifmt_clock_provider_from_bitmap(
+				((codec == bitclkmaster) << 4) | (codec == framemaster));
+
 	}
 
 	dai_link->dai_fmt = daifmt;
@@ -565,13 +560,12 @@ static int headset_init(struct snd_soc_component *component)
 	int ret;
 
 	/* Enable Headset and 4 Buttons Jack detection */
-	ret = snd_soc_card_jack_new(component->card, "Headset Jack",
-				    SND_JACK_HEADSET |
-				    SND_JACK_BTN_0 | SND_JACK_BTN_1 |
-				    SND_JACK_BTN_2 | SND_JACK_BTN_3,
-				    &headset_jack,
-				    headset_jack_pins,
-				    ARRAY_SIZE(headset_jack_pins));
+	ret = snd_soc_card_jack_new_pins(component->card, "Headset Jack",
+					 SND_JACK_HEADSET | SND_JACK_BTN_0 |
+					 SND_JACK_BTN_1 | SND_JACK_BTN_2 |
+					 SND_JACK_BTN_3, &headset_jack,
+					 headset_jack_pins,
+					 ARRAY_SIZE(headset_jack_pins));
 	if (ret)
 		return ret;
 

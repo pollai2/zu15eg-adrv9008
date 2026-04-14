@@ -112,9 +112,7 @@ static int axiadc_hw_submit_block(struct iio_dma_buffer_queue *queue,
 	struct iio_dev *indio_dev = queue->driver_data;
 	struct axiadc_state *st = iio_priv(indio_dev);
 
-	block->block.bytes_used = block->block.size;
-
-	iio_dmaengine_buffer_submit_block(queue, block, DMA_FROM_DEVICE);
+	iio_dmaengine_buffer_submit_block(queue, block);
 
 	axiadc_write(st, ADI_REG_STATUS, ~0);
 	axiadc_write(st, ADI_REG_DMA_STATUS, ~0);
@@ -240,7 +238,7 @@ static ssize_t axiadc_debugfs_pncheck_write(struct file *file,
 	else
 		mode = ADC_PN_OFF;
 
-	mutex_lock(&indio_dev->mlock);
+	mutex_lock(&conv->lock);
 
 	for (i = 0; i < axiadc_num_phys_channels(st); i++) {
 		if (conv->set_pnsel)
@@ -255,7 +253,7 @@ static ssize_t axiadc_debugfs_pncheck_write(struct file *file,
 	for (i = 0; i < axiadc_num_phys_channels(st); i++)
 		axiadc_write(st, ADI_REG_CHAN_STATUS(i), ~0);
 
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&conv->lock);
 
 	return count;
 }
@@ -271,6 +269,7 @@ static int axiadc_reg_access(struct iio_dev *indio_dev,
 			      unsigned *readval)
 {
 	struct axiadc_state *st = iio_priv(indio_dev);
+	struct axiadc_converter *conv = to_converter(st->dev_spi);
 	int ret;
 
 	/* Check that the register is in range and aligned */
@@ -278,7 +277,7 @@ static int axiadc_reg_access(struct iio_dev *indio_dev,
 	    ((reg & 0xffff) >= st->regs_size || (reg & 0x3)))
 		return -EINVAL;
 
-	mutex_lock(&indio_dev->mlock);
+	mutex_lock(&conv->lock);
 
 	if (!(reg & DEBUGFS_DRA_PCORE_REG_MAGIC)) {
 		struct axiadc_converter *conv = to_converter(st->dev_spi);
@@ -295,7 +294,7 @@ static int axiadc_reg_access(struct iio_dev *indio_dev,
 			*readval = axiadc_read(st, reg & 0xFFFF);
 		ret = 0;
 	}
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&conv->lock);
 
 	return 0;
 }
@@ -372,16 +371,17 @@ static ssize_t axiadc_sampling_frequency_available(struct device *dev,
 {
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct axiadc_state *st = iio_priv(indio_dev);
+	struct axiadc_converter *conv = to_converter(st->dev_spi);
 	unsigned long freq;
 	int i, ret;
 
 	if (!st->decimation_factor)
 		return -ENODEV;
 
-	mutex_lock(&indio_dev->mlock);
+	mutex_lock(&conv->lock);
 	ret = axiadc_get_parent_sampling_frequency(st, &freq);
 	if (ret < 0) {
-		mutex_unlock(&indio_dev->mlock);
+		mutex_unlock(&conv->lock);
 		return ret;
 	}
 
@@ -391,7 +391,7 @@ static ssize_t axiadc_sampling_frequency_available(struct device *dev,
 
 	ret += snprintf(&buf[ret], PAGE_SIZE - ret, "\n");
 
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&conv->lock);
 
 	return ret;
 }
@@ -406,13 +406,14 @@ static ssize_t axiadc_sync_start_store(struct device *dev,
 {
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct axiadc_state *st = iio_priv(indio_dev);
+	struct axiadc_converter *conv = to_converter(st->dev_spi);
 	int ret;
 
 	ret = sysfs_match_string(axiadc_sync_ctrls, buf);
 	if (ret < 0)
 		return ret;
 
-	mutex_lock(&indio_dev->mlock);
+	mutex_lock(&conv->lock);
 	if (st->ext_sync_avail) {
 		switch (ret) {
 		case 0:
@@ -433,7 +434,7 @@ static ssize_t axiadc_sync_start_store(struct device *dev,
 		reg = axiadc_read(st, ADI_REG_CNTRL);
 		axiadc_write(st, ADI_REG_CNTRL, reg | ADI_SYNC);
 	}
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&conv->lock);
 
 	return ret < 0 ? ret : len;
 }
@@ -508,7 +509,7 @@ static int axiadc_read_raw(struct iio_dev *indio_dev,
 	switch (m) {
 	case IIO_CHAN_INFO_CALIBPHASE:
 		phase = 1;
-		/* fall-through */
+		fallthrough;
 	case IIO_CHAN_INFO_CALIBSCALE:
 		tmp = axiadc_read(st, ADI_REG_CHAN_CNTRL_2(channel));
 		/*  format is 1.1.14 (sign, integer and fractional bits) */
@@ -565,7 +566,8 @@ static int axiadc_read_raw(struct iio_dev *indio_dev,
 	case IIO_CHAN_INFO_SAMP_FREQ:
 		*val2 = 0;
 		ret = conv->read_raw(indio_dev, chan, val, val2, m);
-		llval = (u64)*val2 << 32 | *val;
+		llval = (((u64)*val2) << 32) | (u32)*val;
+
 		if (ret < 0 || !llval) {
 			tmp = ADI_TO_CLK_FREQ(axiadc_read(st, ADI_REG_CLK_FREQ));
 			llval = tmp * 100000000ULL /* FIXME */ * ADI_TO_CLK_RATIO(axiadc_read(st, ADI_REG_CLK_RATIO));
@@ -611,7 +613,7 @@ static int axiadc_write_raw(struct iio_dev *indio_dev,
 	switch (mask) {
 	case IIO_CHAN_INFO_CALIBPHASE:
 		phase = 1;
-		/* fall-through */
+		fallthrough;
 	case IIO_CHAN_INFO_CALIBSCALE:
 		/*  format is 1.1.14 (sign, integer and fractional bits) */
 		switch (val) {
@@ -691,20 +693,6 @@ static int axiadc_write_raw(struct iio_dev *indio_dev,
 	default:
 		return conv->write_raw(indio_dev, chan, val, val2, mask);
 	}
-}
-
-static int axiadc_read_label(struct iio_dev *indio_dev,
-			     const struct iio_chan_spec *chan, char *label)
-{
-	struct axiadc_state *st = iio_priv(indio_dev);
-	struct axiadc_converter *conv = to_converter(st->dev_spi);
-
-	if (conv && conv->read_label)
-		return conv->read_label(indio_dev, chan, label);
-	else if (chan->extend_name)
-		return sprintf(label, "%s\n", chan->extend_name);
-	else
-		return -ENOSYS;
 }
 
 static int axiadc_read_event_value(struct iio_dev *indio_dev,
@@ -835,12 +823,11 @@ static int axiadc_channel_setup(struct iio_dev *indio_dev,
 
 	indio_dev->channels = st->channels;
 	indio_dev->num_channels = cnt;
-	indio_dev->masklength = cnt;
 
 	return 0;
 }
 
-static const struct iio_info axiadc_info = {
+static struct iio_info axiadc_info = {
 	.read_raw = &axiadc_read_raw,
 	.write_raw = &axiadc_write_raw,
 	.read_event_value = &axiadc_read_event_value,
@@ -849,12 +836,12 @@ static const struct iio_info axiadc_info = {
 	.write_event_config = &axiadc_write_event_config,
 	.debugfs_reg_access = &axiadc_reg_access,
 	.update_scan_mode = &axiadc_update_scan_mode,
-	.read_label = &axiadc_read_label,
 };
 
 struct axiadc_spidev {
 	struct device_node *of_nspi;
 	struct device *dev_spi;
+	struct module *owner;
 };
 
 static int axiadc_attach_spi_client(struct device *dev, void *data)
@@ -865,6 +852,7 @@ static int axiadc_attach_spi_client(struct device *dev, void *data)
 	device_lock(dev);
 	if ((axiadc_spidev->of_nspi == dev->of_node) && dev->driver) {
 		axiadc_spidev->dev_spi = dev;
+		axiadc_spidev->owner = dev->driver->owner;
 		ret = 1;
 	}
 	device_unlock(dev);
@@ -1054,10 +1042,10 @@ int axiadc_append_attrs(struct iio_dev *indio_dev,
 
 static void axiadc_release_converter(void *conv)
 {
-	struct device *dev = conv;
+	struct axiadc_spidev *axiadc_spidev = conv;
 
-	put_device(dev);
-	module_put(dev->driver->owner);
+	put_device(axiadc_spidev->dev_spi);
+	module_put(axiadc_spidev->owner);
 }
 
 /**
@@ -1077,8 +1065,9 @@ static int axiadc_probe(struct platform_device *pdev)
 	struct iio_dev *indio_dev;
 	struct axiadc_state *st;
 	struct resource *mem;
-	struct axiadc_spidev axiadc_spidev;
+	struct axiadc_spidev *axiadc_spidev;
 	struct axiadc_converter *conv;
+	struct device_link *link;
 	unsigned int config, skip = 1;
 	int ret;
 
@@ -1091,27 +1080,38 @@ static int axiadc_probe(struct platform_device *pdev)
 
 	info = id->data;
 
+	axiadc_spidev = devm_kzalloc(&pdev->dev, sizeof(*axiadc_spidev), GFP_KERNEL);
+	if (!axiadc_spidev)
+		return -ENOMEM;
+
 	/* Defer driver probe until matching spi
 	 * converter driver is registered
 	 */
-	axiadc_spidev.of_nspi = of_parse_phandle(pdev->dev.of_node,
-						 "spibus-connected", 0);
-	if (!axiadc_spidev.of_nspi) {
+	axiadc_spidev->of_nspi = of_parse_phandle(pdev->dev.of_node,
+						  "spibus-connected", 0);
+	if (!axiadc_spidev->of_nspi) {
 		dev_err(&pdev->dev, "could not find spi node\n");
 		return -ENODEV;
 	}
 
-	ret = bus_for_each_dev(&spi_bus_type, NULL, &axiadc_spidev,
+	ret = bus_for_each_dev(&spi_bus_type, NULL, axiadc_spidev,
 			       axiadc_attach_spi_client);
+	of_node_put(axiadc_spidev->of_nspi);
 	if (ret == 0)
 		return -EPROBE_DEFER;
 
-	if (!try_module_get(axiadc_spidev.dev_spi->driver->owner))
+	if (!try_module_get(axiadc_spidev->owner))
 		return -ENODEV;
 
-	get_device(axiadc_spidev.dev_spi);
+	get_device(axiadc_spidev->dev_spi);
 
-	ret = devm_add_action_or_reset(&pdev->dev, axiadc_release_converter, axiadc_spidev.dev_spi);
+	link = device_link_add(&pdev->dev, axiadc_spidev->dev_spi,
+			       DL_FLAG_AUTOREMOVE_SUPPLIER);
+	if (!link)
+		dev_warn(&pdev->dev, "failed to create device link to %s\n",
+			dev_name(axiadc_spidev->dev_spi));
+
+	ret = devm_add_action_or_reset(&pdev->dev, axiadc_release_converter, axiadc_spidev);
 	if (ret)
 		return ret;
 
@@ -1131,7 +1131,7 @@ static int axiadc_probe(struct platform_device *pdev)
 	if (IS_ERR(st->regs))
 		return PTR_ERR(st->regs);
 
-	st->dev_spi = axiadc_spidev.dev_spi;
+	st->dev_spi = axiadc_spidev->dev_spi;
 
 	platform_set_drvdata(pdev, indio_dev);
 
@@ -1148,6 +1148,7 @@ static int axiadc_probe(struct platform_device *pdev)
 
 	iio_device_set_drvdata(indio_dev, conv);
 	conv->indio_dev = indio_dev;
+	mutex_init(&conv->lock);
 
 	if (conv->chip_info->num_shadow_slave_channels) {
 		u32 regs[2];
@@ -1194,6 +1195,8 @@ static int axiadc_probe(struct platform_device *pdev)
 	axiadc_channel_setup(indio_dev, conv->chip_info->channel,
 			     st->dp_disable ? 0 : conv->chip_info->num_channels);
 
+	/* only have labels if really supported */
+	axiadc_info.read_label = conv->read_label;
 	st->iio_info = axiadc_info;
 	st->iio_info.attrs = conv->attrs;
 	indio_dev->info = &st->iio_info;
@@ -1230,7 +1233,7 @@ static int axiadc_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = iio_device_register(indio_dev);
+	ret = devm_iio_device_register(&pdev->dev, indio_dev);
 	if (ret)
 		return ret;
 
@@ -1276,3 +1279,4 @@ module_platform_driver(axiadc_driver);
 MODULE_AUTHOR("Michael Hennerich <hennerich@blackfin.uclinux.org>");
 MODULE_DESCRIPTION("Analog Devices ADI-AIM");
 MODULE_LICENSE("GPL v2");
+MODULE_IMPORT_NS(IIO_DMAENGINE_BUFFER);

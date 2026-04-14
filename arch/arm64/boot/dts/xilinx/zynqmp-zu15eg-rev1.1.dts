@@ -1,0 +1,4 @@
+/ {
+	model = "ZynqMP ZU15EG Rev1.1";
+	compatible = "xlnx,zynqmp-zu15eg-rev1.1", "xlnx,zynqmp";
+};

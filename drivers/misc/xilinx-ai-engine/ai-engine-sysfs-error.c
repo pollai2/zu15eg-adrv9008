@@ -51,10 +51,7 @@ static ssize_t aie_get_errors_str(struct aie_partition *apart,
 
 	for (i = 0; i < err_attr->num_err_categories; i++) {
 		const struct aie_err_category *category;
-		char errstr[AIE_SYSFS_ERROR_SIZE];
-		bool is_delimit_req = false;
-		bool err = false;
-		ssize_t l = 0;
+		bool is_delimit_req = false, preamble = true;
 		u8 index;
 
 		category = &err_attr->err_category[i];
@@ -66,22 +63,29 @@ static ssize_t aie_get_errors_str(struct aie_partition *apart,
 			if (!aie_check_error_bitmap(apart, loc, module, event))
 				continue;
 
-			if (is_delimit_req) {
-				l += scnprintf(&errstr[l],
-					       max(0L, AIE_SYSFS_ERROR_SIZE - l),
-					       DELIMITER_LEVEL0);
+			if (preamble) {
+				len += scnprintf(&buffer[len],
+						 max(0L, size - len),
+						 "%s: %s: ", mod,
+						 aie_error_category_str[index]);
+				preamble = false;
 			}
 
-			l += scnprintf(&errstr[l],
-				       max(0L, AIE_SYSFS_ERROR_SIZE - l), str);
-			err = true;
+			if (is_delimit_req) {
+				len += scnprintf(&buffer[len],
+						 max(0L, size - len),
+						 DELIMITER_LEVEL0);
+			}
+
+			len += scnprintf(&buffer[len], max(0L, size - len),
+					 str);
+
 			is_delimit_req = true;
 		}
 
-		if (err) {
+		if (!preamble) {
 			len += scnprintf(&buffer[len], max(0L, size - len),
-					 "%s: %s: %s\n", mod,
-					 aie_error_category_str[index], errstr);
+					 "\n");
 		}
 	}
 	return len;
@@ -147,9 +151,9 @@ ssize_t aie_tile_show_error(struct device *dev, struct device_attribute *attr,
 {
 	struct aie_tile *atile = container_of(dev, struct aie_tile, dev);
 	struct aie_partition *apart = atile->apart;
-	const struct aie_error_attr *core_attr, *mem_attr, *pl_attr;
+	const struct aie_error_attr *core_attr, *mem_attr, *memtile_attr, *pl_attr;
 	ssize_t len = 0, size = PAGE_SIZE;
-	u32 ttype, core_count = 0, mem_count = 0, pl_count = 0;
+	u32 ttype, core_count = 0, mem_count = 0, memtile_count = 0, pl_count = 0;
 
 	if (mutex_lock_interruptible(&apart->mlock)) {
 		dev_err(&apart->dev,
@@ -157,7 +161,7 @@ ssize_t aie_tile_show_error(struct device *dev, struct device_attribute *attr,
 		return len;
 	}
 
-	ttype = apart->adev->ops->get_tile_type(&atile->loc);
+	ttype = apart->adev->ops->get_tile_type(apart->adev, &atile->loc);
 	if (ttype == AIE_TILE_TYPE_TILE) {
 		core_attr = apart->adev->core_errors;
 		mem_attr = apart->adev->mem_errors;
@@ -172,7 +176,7 @@ ssize_t aie_tile_show_error(struct device *dev, struct device_attribute *attr,
 						      AIE_PL_MOD, pl_attr);
 	}
 
-	if (!(core_count || mem_count || pl_count)) {
+	if (!(core_count || mem_count || memtile_count || pl_count)) {
 		mutex_unlock(&apart->mlock);
 		return len;
 	}
@@ -185,6 +189,12 @@ ssize_t aie_tile_show_error(struct device *dev, struct device_attribute *attr,
 	if (mem_count) {
 		len += aie_get_errors_str(apart, atile->loc, AIE_MEM_MOD,
 					  mem_attr, &buffer[len], size - len);
+	}
+
+	if (memtile_count) {
+		len += aie_get_errors_str(apart, atile->loc, AIE_MEM_MOD,
+					  memtile_attr, &buffer[len],
+					  size - len);
 	}
 
 	if (pl_count) {
@@ -209,9 +219,9 @@ ssize_t aie_part_show_error_stat(struct device *dev,
 {
 	struct aie_partition *apart = dev_to_aiepart(dev);
 	struct aie_tile *atile = apart->atiles;
-	const struct aie_error_attr *core_attr, *mem_attr, *pl_attr;
+	const struct aie_error_attr *core_attr, *mem_attr, *memtile_attr, *pl_attr;
 	ssize_t len = 0, size = PAGE_SIZE;
-	u32 index, core = 0, mem = 0, pl = 0;
+	u32 index, core = 0, mem = 0, memtile = 0, pl = 0;
 
 	if (mutex_lock_interruptible(&apart->mlock)) {
 		dev_err(&apart->dev,
@@ -221,7 +231,8 @@ ssize_t aie_part_show_error_stat(struct device *dev,
 
 	for (index = 0; index < apart->range.size.col * apart->range.size.row;
 	     index++, atile++) {
-		u32 ttype = apart->adev->ops->get_tile_type(&atile->loc);
+		u32 ttype = apart->adev->ops->get_tile_type(apart->adev,
+							    &atile->loc);
 
 		if (ttype == AIE_TILE_TYPE_TILE) {
 			core_attr = apart->adev->core_errors;
@@ -232,6 +243,11 @@ ssize_t aie_part_show_error_stat(struct device *dev,
 			mem += aie_get_module_error_count(apart, atile->loc,
 							  AIE_MEM_MOD,
 							  mem_attr);
+		} else if (ttype == AIE_TILE_TYPE_MEMORY) {
+			memtile_attr = apart->adev->memtile_errors;
+			memtile = aie_get_module_error_count(apart, atile->loc,
+							     AIE_MEM_MOD,
+							     memtile_attr);
 		} else {
 			pl_attr = apart->adev->shim_errors;
 			pl += aie_get_module_error_count(apart, atile->loc,
@@ -244,6 +260,8 @@ ssize_t aie_part_show_error_stat(struct device *dev,
 	len += scnprintf(&buffer[len], max(0L, size - len), "core: %d\n", core);
 	len += scnprintf(&buffer[len], max(0L, size - len), "memory: %d\n",
 			 mem);
+	len += scnprintf(&buffer[len], max(0L, size - len), "memory_tile: %d\n",
+			 memtile);
 	len += scnprintf(&buffer[len], max(0L, size - len), "pl: %d\n", pl);
 	return len;
 }
@@ -262,11 +280,11 @@ ssize_t aie_sysfs_get_errors(struct aie_partition *apart,
 			     struct aie_location *loc, char *buffer,
 			     ssize_t size)
 {
-	u32 ttype, core_count = 0, mem_count = 0, pl_count = 0;
-	const struct aie_error_attr *core_attr, *mem_attr, *pl_attr;
+	u32 ttype, core_count = 0, mem_count = 0, memtile_count = 0, pl_count = 0;
+	const struct aie_error_attr *core_attr, *mem_attr, *memtile_attr, *pl_attr;
 	ssize_t len = 0;
 
-	ttype = apart->adev->ops->get_tile_type(loc);
+	ttype = apart->adev->ops->get_tile_type(apart->adev, loc);
 	if (ttype == AIE_TILE_TYPE_TILE) {
 		core_attr = apart->adev->core_errors;
 		mem_attr = apart->adev->mem_errors;
@@ -275,14 +293,22 @@ ssize_t aie_sysfs_get_errors(struct aie_partition *apart,
 							core_attr);
 		mem_count  = aie_get_module_error_count(apart, *loc,
 							AIE_MEM_MOD, mem_attr);
+	} else if (ttype == AIE_TILE_TYPE_MEMORY) {
+		memtile_attr = apart->adev->memtile_errors;
+		memtile_count = aie_get_module_error_count(apart, *loc,
+							   AIE_MEM_MOD,
+							   memtile_attr);
 	} else {
 		pl_attr = apart->adev->shim_errors;
 		pl_count = aie_get_module_error_count(apart, *loc, AIE_PL_MOD,
 						      pl_attr);
 	}
 
-	if (!(core_count || mem_count || pl_count))
+	if (!(core_count || mem_count || memtile_count || pl_count))
 		return len;
+
+	len += scnprintf(&buffer[len], max(0L, size - len), "%d_%d: ", loc->col,
+			 loc->row);
 
 	if (core_count) {
 		len += scnprintf(&buffer[len], max(0L, size - len), "core: ");
@@ -299,12 +325,22 @@ ssize_t aie_sysfs_get_errors(struct aie_partition *apart,
 						  size - len);
 	}
 
+	if (memtile_count) {
+		len += scnprintf(&buffer[len], max(0L, size - len),
+				 "memory_tile: ");
+		len += aie_get_error_category_str(apart, *loc, AIE_MEM_MOD,
+						  memtile_attr, &buffer[len],
+						  size - len);
+	}
+
 	if (pl_count) {
 		len += scnprintf(&buffer[len], max(0L, size - len), "pl: ");
 		len += aie_get_error_category_str(apart, *loc, AIE_PL_MOD,
 						  pl_attr, &buffer[len],
 						  size - len);
 	}
+
+	len += scnprintf(&buffer[len], max(0L, size - len), "\n");
 	return len;
 }
 
@@ -337,11 +373,8 @@ ssize_t aie_part_read_cb_error(struct kobject *kobj, char *buffer, ssize_t size)
 
 	for (index = 0; index < apart->range.size.col * apart->range.size.row;
 	     index++, atile++) {
-		len += scnprintf(&buffer[len], max(0L, size - len), "%d_%d: ",
-				 atile->loc.col, atile->loc.row);
 		len += aie_sysfs_get_errors(apart, &atile->loc, &buffer[len],
 					    size - len);
-		len += scnprintf(&buffer[len], max(0L, size - len), "\n");
 	}
 
 	mutex_unlock(&apart->mlock);

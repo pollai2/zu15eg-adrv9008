@@ -16,6 +16,7 @@
 #include <linux/spi/spi.h>
 #include <linux/workqueue.h>
 #include <linux/spi/spi-mem.h>
+#include <linux/mtd/spi-nor.h>
 
 /* Register offset definitions */
 #define ZYNQ_QSPI_CONFIG_OFFSET		0x00 /* Configuration  Register, RW */
@@ -53,6 +54,8 @@
 #define ZYNQ_QSPI_CONFIG_FWIDTH_MASK	GENMASK(7, 6) /* FIFO width */
 #define ZYNQ_QSPI_CONFIG_MSTREN_MASK	BIT(0) /* Master Mode */
 
+#define ZYNQ_QSPI_CS0_MASK		BIT(0)
+#define ZYNQ_QSPI_CS1_MASK		BIT(1)
 /*
  * QSPI Configuration Register - Baud rate and slave select
  *
@@ -62,7 +65,6 @@
 #define ZYNQ_QSPI_CONFIG_BAUD_DIV_MAX	GENMASK(2, 0) /* Baud rate maximum */
 #define ZYNQ_QSPI_CONFIG_BAUD_DIV_SHIFT	3 /* Baud rate divisor shift */
 #define ZYNQ_QSPI_CONFIG_PCS		BIT(10) /* Peripheral Chip Select */
-#define ZYNQ_QSPI_SS_SHIFT		10 /* Slave Select field shift in CR */
 
 /*
  * QSPI Interrupt Registers bit Masks
@@ -118,8 +120,11 @@
 /* Maximum number of chip selects */
 #define ZYNQ_QSPI_MAX_NUM_CS		2
 
+/* Maximum address width */
+#define ZYNQ_QSPI_MAX_ADDR_WIDTH	3
 /**
  * struct zynq_qspi - Defines qspi driver instance
+ * @ctlr:		Pointer to the spi controller information
  * @dev:		Pointer to the this device's information
  * @regs:		Virtual address of the QSPI controller registers
  * @refclk:		Pointer to the peripheral clock
@@ -130,11 +135,11 @@
  * @tx_bytes:		Number of bytes left to transfer
  * @rx_bytes:		Number of bytes left to receive
  * @data_completion:	completion structure
- * @is_dual:		Flag to indicate whether dual flash memories are used
  * @is_stripe:		Flag to indicate if data needs to be split between flashes
  *			(Used in dual parallel configuration)
  */
 struct zynq_qspi {
+	struct spi_controller *ctlr;
 	struct device *dev;
 	void __iomem *regs;
 	struct clk *refclk;
@@ -144,10 +149,38 @@ struct zynq_qspi {
 	u8 *rxbuf;
 	int tx_bytes;
 	int rx_bytes;
-	struct completion data_completion;
-	u32 is_dual;
+	u32 flags;
+#define	ZYNQ_QSPI_MEM_CONFIG		BIT(0)
+#define	ZYNQ_QSPI_IS_PARALLEL		BIT(1)
+#define	ZYNQ_QSPI_IS_STACKED		BIT(2)
 	bool is_stripe;
+	struct completion data_completion;
 };
+
+/**
+ * zynq_qspi_update_stripe - For Zynq QSPI controller data stripe capabilities
+ * @op: Pointer to mem ops
+ * Return:      Status of the data stripe
+ *
+ * Returns true if data stripe need to be enabled, else returns false
+ */
+bool zynq_qspi_update_stripe(const struct spi_mem_op *op)
+{
+	if (op->cmd.opcode ==  SPINOR_OP_BE_4K ||
+	    op->cmd.opcode ==  SPINOR_OP_BE_32K ||
+	    op->cmd.opcode ==  SPINOR_OP_CHIP_ERASE ||
+	    op->cmd.opcode ==  SPINOR_OP_SE ||
+	    op->cmd.opcode ==  SPINOR_OP_BE_32K_4B ||
+	    op->cmd.opcode ==  SPINOR_OP_SE_4B ||
+	    op->cmd.opcode == SPINOR_OP_BE_4K_4B ||
+	    op->cmd.opcode ==  SPINOR_OP_WRSR ||
+	    op->cmd.opcode ==  SPINOR_OP_WREAR ||
+	    op->cmd.opcode ==  SPINOR_OP_BRWR ||
+	    (op->cmd.opcode ==  SPINOR_OP_WRSR2 && !op->addr.nbytes))
+		return false;
+
+	return true;
+}
 
 /*
  * Inline functions for the QSPI controller read/write
@@ -191,7 +224,13 @@ static void zynq_qspi_init_hw(struct zynq_qspi *xqspi, unsigned int num_cs)
 	zynq_qspi_write(xqspi, ZYNQ_QSPI_ENABLE_OFFSET, 0);
 	zynq_qspi_write(xqspi, ZYNQ_QSPI_IDIS_OFFSET, ZYNQ_QSPI_IXR_ALL_MASK);
 
-	zynq_qspi_write(xqspi, ZYNQ_QSPI_LINEAR_CFG_OFFSET, 0);
+	/* Disable linear mode as the boot loader may have used it */
+	config_reg = 0;
+	/* At the same time, enable dual mode if more than 1 CS is available */
+	if (num_cs > 1)
+		config_reg |= ZYNQ_QSPI_LCFG_TWO_MEM;
+
+	zynq_qspi_write(xqspi, ZYNQ_QSPI_LINEAR_CFG_OFFSET, config_reg);
 
 	/* Clear the RX FIFO */
 	while (zynq_qspi_read(xqspi, ZYNQ_QSPI_STATUS_OFFSET) &
@@ -217,20 +256,7 @@ static void zynq_qspi_init_hw(struct zynq_qspi *xqspi, unsigned int num_cs)
 			ZYNQ_QSPI_RX_THRESHOLD);
 	zynq_qspi_write(xqspi, ZYNQ_QSPI_TX_THRESH_OFFSET,
 			ZYNQ_QSPI_TX_THRESHOLD);
-	if (xqspi->is_dual)
-		/* Enable two memories on separate buses */
-		zynq_qspi_write(xqspi, ZYNQ_QSPI_LINEAR_CFG_OFFSET,
-				(ZYNQ_QSPI_LCFG_TWO_MEM |
-				ZYNQ_QSPI_LCFG_SEP_BUS |
-				(1 << ZYNQ_QSPI_LCFG_DUMMY_SHIFT) |
-				ZYNQ_QSPI_FAST_READ_QOUT_CODE));
-#ifdef CONFIG_SPI_ZYNQ_QSPI_DUAL_STACKED
-	/* Enable two memories on shared bus */
-	zynq_qspi_write(xqspi, ZYNQ_QSPI_LINEAR_CFG_OFFSET,
-			(ZYNQ_QSPI_LCFG_TWO_MEM |
-			(1 << ZYNQ_QSPI_LCFG_DUMMY_SHIFT) |
-			ZYNQ_QSPI_FAST_READ_QOUT_CODE));
-#endif
+
 	zynq_qspi_write(xqspi, ZYNQ_QSPI_ENABLE_OFFSET,
 			ZYNQ_QSPI_ENABLE_ENABLE_MASK);
 }
@@ -240,6 +266,7 @@ static bool zynq_qspi_supports_op(struct spi_mem *mem,
 {
 	if (!spi_mem_default_supports_op(mem, op))
 		return false;
+
 	return true;
 }
 
@@ -250,14 +277,14 @@ static bool zynq_qspi_supports_op(struct spi_mem *mem,
  */
 static void zynq_qspi_rxfifo_op(struct zynq_qspi *xqspi, unsigned int size)
 {
-	u32 data;
 	unsigned int xsize;
+	u32 data;
 
 	data = zynq_qspi_read(xqspi, ZYNQ_QSPI_RXD_OFFSET);
 
 	if (xqspi->rxbuf) {
 		xsize = size;
-		if (xqspi->is_dual && xqspi->is_stripe && (size % 2))
+		if (xqspi->is_stripe && (size % 2))
 			xsize++;
 		memcpy(xqspi->rxbuf, ((u8 *)&data) + 4 - xsize, size);
 		xqspi->rxbuf += size;
@@ -278,8 +305,8 @@ static void zynq_qspi_txfifo_op(struct zynq_qspi *xqspi, unsigned int size)
 	static const unsigned int offset[4] = {
 		ZYNQ_QSPI_TXD_00_01_OFFSET, ZYNQ_QSPI_TXD_00_10_OFFSET,
 		ZYNQ_QSPI_TXD_00_11_OFFSET, ZYNQ_QSPI_TXD_00_00_OFFSET };
-	u32 data;
 	unsigned int xsize;
+	u32 data;
 
 	if (xqspi->txbuf) {
 		data = 0xffffffff;
@@ -291,9 +318,8 @@ static void zynq_qspi_txfifo_op(struct zynq_qspi *xqspi, unsigned int size)
 
 	xqspi->tx_bytes -= size;
 	xsize = size;
-	if (xqspi->is_dual && xqspi->is_stripe && (size % 2))
+	if (xqspi->is_stripe && (size % 2))
 		xsize++;
-
 	zynq_qspi_write(xqspi, offset[xsize - 1], data);
 }
 
@@ -307,29 +333,31 @@ static void zynq_qspi_chipselect(struct spi_device *spi, bool assert)
 	struct spi_controller *ctlr = spi->master;
 	struct zynq_qspi *xqspi = spi_controller_get_devdata(ctlr);
 	u32 config_reg;
-#ifdef CONFIG_SPI_ZYNQ_QSPI_DUAL_STACKED
-	u32 lqspi_cfg_reg;
-#endif
+	u8 idx = 0;
 
-	config_reg = zynq_qspi_read(xqspi, ZYNQ_QSPI_CONFIG_OFFSET);
+	/* Select the lower (CS0) or upper (CS1) memory */
+	if (ctlr->num_chipselect > 1) {
+		config_reg = zynq_qspi_read(xqspi, ZYNQ_QSPI_LINEAR_CFG_OFFSET);
+		if (!(xqspi->flags & ZYNQ_QSPI_IS_PARALLEL)) {
+			if (spi->cs_index_mask & ZYNQ_QSPI_CS1_MASK)
+				idx = 1;
 
-#ifdef CONFIG_SPI_ZYNQ_QSPI_DUAL_STACKED
-	lqspi_cfg_reg = zynq_qspi_read(xqspi, ZYNQ_QSPI_LINEAR_CFG_OFFSET);
-		if (spi->master->flags & SPI_MASTER_U_PAGE)
-			lqspi_cfg_reg |= ZYNQ_QSPI_LCFG_U_PAGE;
-		else
-			lqspi_cfg_reg &= ~ZYNQ_QSPI_LCFG_U_PAGE;
-		zynq_qspi_write(xqspi, ZYNQ_QSPI_LINEAR_CFG_OFFSET,
-				lqspi_cfg_reg);
-#endif
-	/* Ground the line to assert the CS */
-	if (assert) {
-		config_reg &= ~ZYNQ_QSPI_CONFIG_PCS;
-		config_reg |= (((~(BIT(spi->chip_select))) <<
-			       ZYNQ_QSPI_SS_SHIFT) & ZYNQ_QSPI_CONFIG_PCS);
-	} else {
-		config_reg |= ZYNQ_QSPI_CONFIG_PCS;
+			if (!spi_get_chipselect(spi, idx))
+				config_reg &= ~ZYNQ_QSPI_LCFG_U_PAGE;
+			else
+				config_reg |= ZYNQ_QSPI_LCFG_U_PAGE;
+		}
+
+		zynq_qspi_write(xqspi, ZYNQ_QSPI_LINEAR_CFG_OFFSET, config_reg);
 	}
+
+	/* Ground the line to assert the CS */
+	config_reg = zynq_qspi_read(xqspi, ZYNQ_QSPI_CONFIG_OFFSET);
+	if (assert)
+		config_reg &= ~ZYNQ_QSPI_CONFIG_PCS;
+	else
+		config_reg |= ZYNQ_QSPI_CONFIG_PCS;
+
 	zynq_qspi_write(xqspi, ZYNQ_QSPI_CONFIG_OFFSET, config_reg);
 }
 
@@ -353,7 +381,17 @@ static void zynq_qspi_chipselect(struct spi_device *spi, bool assert)
 static int zynq_qspi_config_op(struct zynq_qspi *xqspi, struct spi_device *spi)
 {
 	u32 config_reg, baud_rate_val = 0;
+	u32 lqspi_cfg_reg = 0;
 
+	lqspi_cfg_reg = zynq_qspi_read(xqspi, ZYNQ_QSPI_LINEAR_CFG_OFFSET);
+	/* In dual parallel enable two memories on separate buses */
+	if ((spi->cs_index_mask & ZYNQ_QSPI_CS0_MASK) &&
+	    (spi->cs_index_mask & ZYNQ_QSPI_CS1_MASK)) {
+		lqspi_cfg_reg |= ZYNQ_QSPI_LCFG_SEP_BUS;
+		xqspi->flags |= ZYNQ_QSPI_IS_PARALLEL;
+	}
+	lqspi_cfg_reg |= ((1 << ZYNQ_QSPI_LCFG_DUMMY_SHIFT) | ZYNQ_QSPI_FAST_READ_QOUT_CODE);
+	zynq_qspi_write(xqspi, ZYNQ_QSPI_LINEAR_CFG_OFFSET, lqspi_cfg_reg);
 	/*
 	 * Set the clock frequency
 	 * The baud rate divisor is not a direct mapping to the value written
@@ -371,8 +409,6 @@ static int zynq_qspi_config_op(struct zynq_qspi *xqspi, struct spi_device *spi)
 	config_reg = zynq_qspi_read(xqspi, ZYNQ_QSPI_CONFIG_OFFSET);
 
 	/* Set the QSPI clock phase and clock polarity */
-	config_reg &= (~ZYNQ_QSPI_CONFIG_CPHA_MASK) &
-		      (~ZYNQ_QSPI_CONFIG_CPOL_MASK);
 	if (spi->mode & SPI_CPHA)
 		config_reg |= ZYNQ_QSPI_CONFIG_CPHA_MASK;
 	if (spi->mode & SPI_CPOL)
@@ -545,6 +581,7 @@ static int zynq_qspi_exec_mem_op(struct spi_mem *mem,
 				 const struct spi_mem_op *op)
 {
 	struct zynq_qspi *xqspi = spi_controller_get_devdata(mem->spi->master);
+	u8 opaddr[ZYNQ_QSPI_MAX_ADDR_WIDTH];
 	int err = 0, i;
 	u8 *tmpbuf;
 
@@ -552,8 +589,11 @@ static int zynq_qspi_exec_mem_op(struct spi_mem *mem,
 		op->cmd.opcode, op->cmd.buswidth, op->addr.buswidth,
 		op->dummy.buswidth, op->data.buswidth);
 
-	zynq_qspi_chipselect(mem->spi, true);
+	if (op->addr.nbytes > ZYNQ_QSPI_MAX_ADDR_WIDTH)
+		return -EINVAL;
+
 	zynq_qspi_config_op(xqspi, mem->spi);
+	zynq_qspi_chipselect(mem->spi, true);
 
 	if (op->cmd.opcode) {
 		reinit_completion(&xqspi->data_completion);
@@ -564,12 +604,13 @@ static int zynq_qspi_exec_mem_op(struct spi_mem *mem,
 		zynq_qspi_write_op(xqspi, ZYNQ_QSPI_FIFO_DEPTH, true);
 		zynq_qspi_write(xqspi, ZYNQ_QSPI_IEN_OFFSET,
 				ZYNQ_QSPI_IXR_RXTX_MASK);
-		if (!wait_for_completion_interruptible_timeout(&xqspi->data_completion,
+		if (!wait_for_completion_timeout(&xqspi->data_completion,
 							       msecs_to_jiffies(1000)))
 			err = -ETIMEDOUT;
 	}
 
 	if (op->addr.nbytes) {
+		xqspi->txbuf = opaddr;
 		for (i = 0; i < op->addr.nbytes; i++) {
 			xqspi->txbuf[i] = op->addr.val >>
 					(8 * (op->addr.nbytes - i - 1));
@@ -582,13 +623,16 @@ static int zynq_qspi_exec_mem_op(struct spi_mem *mem,
 		zynq_qspi_write_op(xqspi, ZYNQ_QSPI_FIFO_DEPTH, true);
 		zynq_qspi_write(xqspi, ZYNQ_QSPI_IEN_OFFSET,
 				ZYNQ_QSPI_IXR_RXTX_MASK);
-		if (!wait_for_completion_interruptible_timeout(&xqspi->data_completion,
+		if (!wait_for_completion_timeout(&xqspi->data_completion,
 							       msecs_to_jiffies(1000)))
 			err = -ETIMEDOUT;
 	}
 
 	if (op->dummy.nbytes) {
 		tmpbuf = kzalloc(op->dummy.nbytes, GFP_KERNEL);
+		if (!tmpbuf)
+			return -ENOMEM;
+
 		memset(tmpbuf, 0xff, op->dummy.nbytes);
 		reinit_completion(&xqspi->data_completion);
 		xqspi->txbuf = tmpbuf;
@@ -598,7 +642,7 @@ static int zynq_qspi_exec_mem_op(struct spi_mem *mem,
 		zynq_qspi_write_op(xqspi, ZYNQ_QSPI_FIFO_DEPTH, true);
 		zynq_qspi_write(xqspi, ZYNQ_QSPI_IEN_OFFSET,
 				ZYNQ_QSPI_IXR_RXTX_MASK);
-		if (!wait_for_completion_interruptible_timeout(&xqspi->data_completion,
+		if (!wait_for_completion_timeout(&xqspi->data_completion,
 							       msecs_to_jiffies(1000)))
 			err = -ETIMEDOUT;
 
@@ -606,8 +650,8 @@ static int zynq_qspi_exec_mem_op(struct spi_mem *mem,
 	}
 
 	if (op->data.nbytes) {
-		if (xqspi->is_dual)
-			xqspi->is_stripe = update_stripe(op);
+		if (xqspi->flags & ZYNQ_QSPI_IS_PARALLEL)
+			xqspi->is_stripe = zynq_qspi_update_stripe(op);
 		reinit_completion(&xqspi->data_completion);
 		if (op->data.dir == SPI_MEM_DATA_OUT) {
 			xqspi->txbuf = (u8 *)op->data.buf.out;
@@ -624,7 +668,7 @@ static int zynq_qspi_exec_mem_op(struct spi_mem *mem,
 		zynq_qspi_write_op(xqspi, ZYNQ_QSPI_FIFO_DEPTH, true);
 		zynq_qspi_write(xqspi, ZYNQ_QSPI_IEN_OFFSET,
 				ZYNQ_QSPI_IXR_RXTX_MASK);
-		if (!wait_for_completion_interruptible_timeout(&xqspi->data_completion,
+		if (!wait_for_completion_timeout(&xqspi->data_completion,
 							       msecs_to_jiffies(1000)))
 			err = -ETIMEDOUT;
 	}
@@ -664,6 +708,7 @@ static int zynq_qspi_probe(struct platform_device *pdev)
 
 	xqspi = spi_controller_get_devdata(ctlr);
 	xqspi->dev = dev;
+	xqspi->ctlr = ctlr;
 	platform_set_drvdata(pdev, xqspi);
 	xqspi->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(xqspi->regs)) {
@@ -671,11 +716,6 @@ static int zynq_qspi_probe(struct platform_device *pdev)
 		goto remove_master;
 	}
 
-	if (of_property_read_u32(pdev->dev.of_node, "is-dual",
-				 &xqspi->is_dual)) {
-		dev_warn(&pdev->dev, "couldn't determine configuration info");
-		dev_warn(&pdev->dev, "about dual memories. defaulting to single memory\n");
-	}
 	xqspi->pclk = devm_clk_get(&pdev->dev, "pclk");
 	if (IS_ERR(xqspi->pclk)) {
 		dev_err(&pdev->dev, "pclk clock not found.\n");
@@ -707,14 +747,14 @@ static int zynq_qspi_probe(struct platform_device *pdev)
 	xqspi->irq = platform_get_irq(pdev, 0);
 	if (xqspi->irq <= 0) {
 		ret = -ENXIO;
-		goto remove_master;
+		goto clk_dis_all;
 	}
 	ret = devm_request_irq(&pdev->dev, xqspi->irq, zynq_qspi_irq,
 			       0, pdev->name, xqspi);
 	if (ret != 0) {
 		ret = -ENXIO;
 		dev_err(&pdev->dev, "request_irq failed\n");
-		goto remove_master;
+		goto clk_dis_all;
 	}
 
 	ret = of_property_read_u32(np, "num-cs",
@@ -722,18 +762,20 @@ static int zynq_qspi_probe(struct platform_device *pdev)
 	if (ret < 0) {
 		ctlr->num_chipselect = 1;
 	} else if (num_cs > ZYNQ_QSPI_MAX_NUM_CS) {
+		ret = -EINVAL;
 		dev_err(&pdev->dev, "only 2 chip selects are available\n");
-		goto remove_master;
+		goto clk_dis_all;
 	} else {
 		ctlr->num_chipselect = num_cs;
 	}
 
-	ctlr->mode_bits = SPI_CPOL | SPI_CPHA | SPI_RX_DUAL | SPI_RX_QUAD |
+	ctlr->mode_bits =  SPI_CPOL | SPI_CPHA | SPI_RX_DUAL | SPI_RX_QUAD |
 			    SPI_TX_DUAL | SPI_TX_QUAD;
 	ctlr->mem_ops = &zynq_qspi_mem_ops;
 	ctlr->setup = zynq_qspi_setup_op;
 	ctlr->max_speed_hz = clk_get_rate(xqspi->refclk) / 2;
 	ctlr->dev.of_node = np;
+	ctlr->multi_cs_cap = true;
 
 	/* QSPI controller initializations */
 	zynq_qspi_init_hw(xqspi, ctlr->num_chipselect);

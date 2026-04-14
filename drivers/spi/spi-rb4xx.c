@@ -107,7 +107,7 @@ static int rb4xx_transfer_one(struct spi_master *master,
 	 * command set was designed to almost not clash with that of the
 	 * boot flash.
 	 */
-	if (spi->chip_select == 2)
+	if (spi_get_chipselect(spi, 0) == 2)
 		/* MMC */
 		spi_ioc = AR71XX_SPI_IOC_CS0;
 	else
@@ -143,7 +143,7 @@ static int rb4xx_spi_probe(struct platform_device *pdev)
 	if (IS_ERR(spi_base))
 		return PTR_ERR(spi_base);
 
-	master = spi_alloc_master(&pdev->dev, sizeof(*rbspi));
+	master = devm_spi_alloc_master(&pdev->dev, sizeof(*rbspi));
 	if (!master)
 		return -ENOMEM;
 

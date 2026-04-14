@@ -66,6 +66,8 @@ struct axiadc_chip_info {
 
 struct axiadc_state {
 	struct iio_info			iio_info;
+	/* protect against device accesses */
+	struct mutex			lock;
 	void __iomem			*regs;
 	unsigned int			pcore_version;
 };
@@ -86,9 +88,7 @@ static int axiadc_hw_submit_block(struct iio_dma_buffer_queue *queue,
 	struct iio_dev *indio_dev = queue->driver_data;
 	struct axiadc_state *st = iio_priv(indio_dev);
 
-	block->block.bytes_used = block->block.size;
-
-	iio_dmaengine_buffer_submit_block(queue, block, DMA_FROM_DEVICE);
+	iio_dmaengine_buffer_submit_block(queue, block);
 
 	axiadc_write(st, ADI_REG_STATUS, ~0);
 	axiadc_write(st, ADI_REG_DMA_STATUS, ~0);
@@ -126,12 +126,12 @@ static int axiadc_reg_access(struct iio_dev *indio_dev,
 {
 	struct axiadc_state *st = iio_priv(indio_dev);
 
-	mutex_lock(&indio_dev->mlock);
+	mutex_lock(&st->lock);
 	if (readval == NULL)
 		axiadc_write(st, reg & 0xFFFF, writeval);
 	else
 		*readval = axiadc_read(st, reg & 0xFFFF);
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&st->lock);
 
 	return 0;
 }
@@ -230,6 +230,8 @@ static int axiadc_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
+	mutex_init(&st->lock);
+
 	ret = devm_iio_device_register(&pdev->dev, indio_dev);
 	if (ret)
 		return ret;
@@ -263,3 +265,4 @@ module_platform_driver(axiadc_driver);
 MODULE_AUTHOR("Dragos Bogdan <dragos.bogdan@analog.com>");
 MODULE_DESCRIPTION("Analog Devices MC-ADC");
 MODULE_LICENSE("GPL v2");
+MODULE_IMPORT_NS(IIO_DMAENGINE_BUFFER);

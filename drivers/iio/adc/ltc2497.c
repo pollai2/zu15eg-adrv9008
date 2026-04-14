@@ -28,15 +28,14 @@ struct ltc2497_driverdata {
 	struct ltc2497core_driverdata common_ddata;
 	struct i2c_client *client;
 	u32 recv_size;
-	u32 sub_lsb;
 	/*
-	 * DMA (thus cache coherency maintenance) requires the
+	 * DMA (thus cache coherency maintenance) may require the
 	 * transfer buffers to live in their own cache lines.
 	 */
 	union {
 		__be32 d32;
 		u8 d8[3];
-	} data ____cacheline_aligned;
+	} data __aligned(IIO_DMA_MINALIGN);
 };
 
 static int ltc2497_result_and_measure(struct ltc2497core_driverdata *ddata,
@@ -48,10 +47,11 @@ static int ltc2497_result_and_measure(struct ltc2497core_driverdata *ddata,
 
 	if (val) {
 		if (st->recv_size == 3)
-			ret = i2c_master_recv(st->client, (char *)&st->data.d8, st->recv_size);
+			ret = i2c_master_recv(st->client, (char *)&st->data.d8,
+					      st->recv_size);
 		else
-			ret = i2c_master_recv(st->client, (char *)&st->data.d32, st->recv_size);
-
+			ret = i2c_master_recv(st->client, (char *)&st->data.d32,
+					      st->recv_size);
 		if (ret < 0) {
 			dev_err(&st->client->dev, "i2c_master_recv failed\n");
 			return ret;
@@ -64,10 +64,10 @@ static int ltc2497_result_and_measure(struct ltc2497core_driverdata *ddata,
 		 * equivalent to a sign extension.
 		 */
 		if (st->recv_size == 3) {
-			*val = (get_unaligned_be24(st->data.d8) >> st->sub_lsb)
+			*val = (get_unaligned_be24(st->data.d8) >> 6)
 				- BIT(ddata->chip_info->resolution + 1);
 		} else {
-			*val = (be32_to_cpu(st->data.d32) >> st->sub_lsb)
+			*val = (be32_to_cpu(st->data.d32) >> 6)
 				- BIT(ddata->chip_info->resolution + 1);
 		}
 
@@ -121,19 +121,16 @@ static int ltc2497_probe(struct i2c_client *client,
 	st->common_ddata.chip_info = chip_info;
 
 	resolution = chip_info->resolution;
-	st->sub_lsb = 31 - (resolution + 1);
 	st->recv_size = BITS_TO_BYTES(resolution) + 1;
 
 	return ltc2497core_probe(dev, indio_dev);
 }
 
-static int ltc2497_remove(struct i2c_client *client)
+static void ltc2497_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 
 	ltc2497core_remove(indio_dev);
-
-	return 0;
 }
 
 static const struct ltc2497_chip_info ltc2497_info[] = {

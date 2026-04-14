@@ -172,7 +172,6 @@ struct onfi_ext_param_page {
  * @nvddr_timing_modes: Supported source synchronous/NV-DDR timing modes
  * @vendor_revision: Vendor specific revision number
  * @vendor: Vendor specific data
- * @jedec_id: jedec id of the flash
  */
 struct onfi_params {
 	int version;
@@ -183,10 +182,8 @@ struct onfi_params {
 	bool fast_tCAD;
 	u16 sdr_timing_modes;
 	u16 nvddr_timing_modes;
-	u16 src_sync_timing_mode;
 	u16 vendor_revision;
 	u8 vendor[88];
-	u8 jedec_id;
 };
 
 #endif /* __LINUX_MTD_ONFI_H */

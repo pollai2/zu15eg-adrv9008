@@ -179,7 +179,7 @@ aie_part_get_dmabuf_da_from_off(struct aie_partition *apart, int dmabuf_fd,
  * aie_part_set_shimdma_bd() - Set the buffer descriptor to AI engine partition
  *			       hardware
  * @apart: AI engine partition
- * @loc: AI engine tile location
+ * @loc: AI engine tile location relative in partition
  * @bd_id: buffer descriptor ID
  * @bd: pointer buffer descriptor content
  * @return: 0 for success, negative value for failure
@@ -190,6 +190,7 @@ aie_part_get_dmabuf_da_from_off(struct aie_partition *apart, int dmabuf_fd,
 static int aie_part_set_shimdma_bd(struct aie_partition *apart,
 				   struct aie_location loc, u32 bd_id, u32 *bd)
 {
+	struct aie_aperture *aperture = apart->aperture;
 	const struct aie_dma_attr *shim_dma = apart->adev->shim_dma;
 	struct aie_location loc_adjust;
 	u32 i, regoff, intile_regoff;
@@ -197,11 +198,11 @@ static int aie_part_set_shimdma_bd(struct aie_partition *apart,
 	intile_regoff = shim_dma->bd_regoff + shim_dma->bd_len * bd_id;
 	loc_adjust.col = loc.col + apart->range.start.col;
 	loc_adjust.row = loc.row + apart->range.start.row;
-	regoff = aie_cal_regoff(apart->adev, loc_adjust, intile_regoff);
+	regoff = aie_aperture_cal_regoff(aperture, loc_adjust, intile_regoff);
 
 	for (i = 0; i < shim_dma->bd_len / (sizeof(*bd));
 	     i++, regoff += sizeof(*bd))
-		iowrite32(bd[i], apart->adev->base + regoff);
+		iowrite32(bd[i], aperture->base + regoff);
 	return 0;
 }
 
@@ -225,7 +226,7 @@ static int aie_part_validate_bdloc(struct aie_partition *apart,
 	loc_adjust.col = loc.col + apart->range.start.col;
 	loc_adjust.row = loc.row + apart->range.start.row;
 
-	if (aie_validate_location(apart, loc_adjust) < 0) {
+	if (aie_validate_location(apart, loc) < 0) {
 		dev_err(&apart->dev,
 			"invalid loc (%u,%u) in (%u,%u).\n",
 			loc.col, loc.row,
@@ -233,7 +234,7 @@ static int aie_part_validate_bdloc(struct aie_partition *apart,
 		return -EINVAL;
 	}
 
-	ttype = apart->adev->ops->get_tile_type(&loc_adjust);
+	ttype = apart->adev->ops->get_tile_type(apart->adev, &loc_adjust);
 	if (ttype != AIE_TILE_TYPE_SHIMNOC) {
 		dev_err(&apart->dev,
 			"failed to set bd, (%u,%u) is not SHIM NOC\n",
@@ -476,32 +477,28 @@ long aie_part_detach_dmabuf_req(struct aie_partition *apart,
 /**
  * aie_part_set_bd() - Set AI engine SHIM DMA buffer descriptor
  * @apart: AI engine partition
- * @user_args: user AI engine dmabuf argument
+ * @args: user AI engine dmabuf argument
  *
  * @return: 0 for success, negative value for failure
  *
  * This function set the user specified buffer descriptor into the SHIM DMA
  * buffer descriptor.
  */
-long aie_part_set_bd(struct aie_partition *apart, void __user *user_args)
+long aie_part_set_bd(struct aie_partition *apart, struct aie_dma_bd_args *args)
 {
 	struct aie_device *adev = apart->adev;
 	const struct aie_dma_attr *shim_dma = adev->shim_dma;
-	struct aie_dma_bd_args args;
 	u32 *bd, *tmpbd, buf_len, laddr, haddr, regval;
 	dma_addr_t addr;
 	int ret;
 
-	if (copy_from_user(&args, user_args, sizeof(args)))
-		return -EFAULT;
-
-	ret = aie_part_validate_bdloc(apart, args.loc, args.bd_id);
+	ret = aie_part_validate_bdloc(apart, args->loc, args->bd_id);
 	if (ret) {
 		dev_err(&apart->dev, "invalid SHIM DMA BD reg address.\n");
 		return -EINVAL;
 	}
 
-	bd = memdup_user((void __user *)args.bd, shim_dma->bd_len);
+	bd = memdup_user((void __user *)args->bd, shim_dma->bd_len);
 	if (IS_ERR(bd))
 		return PTR_ERR(bd);
 
@@ -513,19 +510,12 @@ long aie_part_set_bd(struct aie_partition *apart, void __user *user_args)
 		return -EINVAL;
 	}
 
-	ret = mutex_lock_interruptible(&apart->mlock);
-	if (ret) {
-		kfree(bd);
-		return ret;
-	}
-
 	/* Get device address from virtual address */
-	addr = aie_part_get_dmabuf_da(apart, (void *)(uintptr_t)args.data_va,
+	addr = aie_part_get_dmabuf_da(apart, (void *)(uintptr_t)args->data_va,
 				      buf_len);
 	if (!addr) {
 		dev_err(&apart->dev, "invalid buffer 0x%llx, 0x%x.\n",
-			args.data_va, buf_len);
-		mutex_unlock(&apart->mlock);
+			args->data_va, buf_len);
 		kfree(bd);
 		return -EINVAL;
 	}
@@ -542,8 +532,7 @@ long aie_part_set_bd(struct aie_partition *apart, void __user *user_args)
 	*tmpbd &= ~shim_dma->haddr.mask;
 	*tmpbd |= aie_get_field_val(&shim_dma->haddr, haddr);
 
-	ret = aie_part_set_shimdma_bd(apart, args.loc, args.bd_id, bd);
-	mutex_unlock(&apart->mlock);
+	ret = aie_part_set_shimdma_bd(apart, args->loc, args->bd_id, bd);
 	if (ret)
 		dev_err(&apart->dev, "failed to set to shim dma bd.\n");
 
@@ -552,9 +541,37 @@ long aie_part_set_bd(struct aie_partition *apart, void __user *user_args)
 }
 
 /**
- * aie_part_set_dmabuf_bd() - Set AI engine SHIM DMA dmabuf buffer descriptor
+ * aie_part_set_bd_from_user() - Set AI engine SHIM DMA buffer descriptor
  * @apart: AI engine partition
  * @user_args: user AI engine dmabuf argument
+ *
+ * @return: 0 for success, negative value for failure
+ *
+ * This function set the user specified buffer descriptor into the SHIM DMA
+ * buffer descriptor.
+ */
+long aie_part_set_bd_from_user(struct aie_partition *apart, void __user *user_args)
+{
+	struct aie_dma_bd_args args;
+	int ret;
+
+	if (copy_from_user(&args, user_args, sizeof(args)))
+		return -EFAULT;
+
+	ret = mutex_lock_interruptible(&apart->mlock);
+	if (ret)
+		return ret;
+
+	ret = aie_part_set_bd(apart, &args);
+
+	mutex_unlock(&apart->mlock);
+	return ret;
+}
+
+/**
+ * aie_part_set_dmabuf_bd() - Set AI engine SHIM DMA dmabuf buffer descriptor
+ * @apart: AI engine partition
+ * @args: user AI engine dmabuf argument
  *
  * @return: 0 for success, negative value for failure
  *
@@ -563,26 +580,22 @@ long aie_part_set_bd(struct aie_partition *apart, void __user *user_args)
  * offset to the start of the buffer descriptor.
  */
 long aie_part_set_dmabuf_bd(struct aie_partition *apart,
-			    void __user *user_args)
+			    struct aie_dmabuf_bd_args *args)
 {
 	struct aie_device *adev = apart->adev;
 	const struct aie_dma_attr *shim_dma = adev->shim_dma;
-	struct aie_dmabuf_bd_args args;
 	u32 *bd, *tmpbd, len, laddr, haddr, regval;
 	u64 off;
 	dma_addr_t addr;
 	int ret;
 
-	if (copy_from_user(&args, user_args, sizeof(args)))
-		return -EFAULT;
-
-	ret = aie_part_validate_bdloc(apart, args.loc, args.bd_id);
+	ret = aie_part_validate_bdloc(apart, args->loc, args->bd_id);
 	if (ret) {
 		dev_err(&apart->dev, "invalid SHIM DMA BD reg address.\n");
 		return -EINVAL;
 	}
 
-	bd = memdup_user((void __user *)args.bd, shim_dma->bd_len);
+	bd = memdup_user((void __user *)args->bd, shim_dma->bd_len);
 	if (IS_ERR(bd))
 		return PTR_ERR(bd);
 
@@ -602,18 +615,11 @@ long aie_part_set_dmabuf_bd(struct aie_partition *apart,
 	haddr = *tmpbd & shim_dma->haddr.mask;
 	off = laddr | ((u64)haddr << 32);
 
-	ret = mutex_lock_interruptible(&apart->mlock);
-	if (ret) {
-		kfree(bd);
-		return ret;
-	}
-
 	/* Get device address from offset */
-	addr = aie_part_get_dmabuf_da_from_off(apart, args.buf_fd, off, len);
+	addr = aie_part_get_dmabuf_da_from_off(apart, args->buf_fd, off, len);
 	if (!addr) {
 		dev_err(&apart->dev, "invalid buffer 0x%llx, 0x%x.\n",
 			off, len);
-		mutex_unlock(&apart->mlock);
 		kfree(bd);
 		return -EINVAL;
 	}
@@ -630,12 +636,41 @@ long aie_part_set_dmabuf_bd(struct aie_partition *apart,
 	*tmpbd &= ~shim_dma->haddr.mask;
 	*tmpbd |= aie_get_field_val(&shim_dma->haddr, haddr);
 
-	ret = aie_part_set_shimdma_bd(apart, args.loc, args.bd_id, bd);
-	mutex_unlock(&apart->mlock);
+	ret = aie_part_set_shimdma_bd(apart, args->loc, args->bd_id, bd);
 	if (ret)
 		dev_err(&apart->dev, "failed to set to shim dma bd.\n");
 
 	kfree(bd);
+	return ret;
+}
+
+/**
+ * aie_part_set_dmabuf_bd_from_user() - Set AI engine SHIM DMA dmabuf buffer descriptor
+ * @apart: AI engine partition
+ * @user_args: user AI engine dmabuf argument
+ *
+ * @return: 0 for success, negative value for failure
+ *
+ * This function set the user specified buffer descriptor into the SHIM DMA
+ * buffer descriptor. The buffer descriptor contained in the @user_args has the
+ * offset to the start of the buffer descriptor.
+ */
+long aie_part_set_dmabuf_bd_from_user(struct aie_partition *apart,
+			    void __user *user_args)
+{
+	struct aie_dmabuf_bd_args args;
+	int ret;
+
+	if (copy_from_user(&args, user_args, sizeof(args)))
+		return -EFAULT;
+
+	ret = mutex_lock_interruptible(&apart->mlock);
+	if (ret)
+		return ret;
+
+	ret = aie_part_set_dmabuf_bd(apart, &args);
+
+	mutex_unlock(&apart->mlock);
 	return ret;
 }
 

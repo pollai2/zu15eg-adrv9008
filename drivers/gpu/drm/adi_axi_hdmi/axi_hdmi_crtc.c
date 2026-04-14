@@ -14,9 +14,11 @@
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_fourcc.h>
-#include <drm/drm_gem_cma_helper.h>
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_plane_helper.h>
+#include <drm/drm_print.h>
 #include <drm/drm_vblank.h>
 
 #include "axi_hdmi_drv.h"
@@ -45,7 +47,7 @@ static struct dma_async_tx_descriptor *axi_hdmi_vdma_prep_interleaved_desc(
 	struct axi_hdmi_crtc *axi_hdmi_crtc = plane_to_axi_hdmi_crtc(plane);
 	struct drm_framebuffer *fb = plane->state->fb;
 	size_t offset, hw_row_size;
-	struct drm_gem_cma_object *obj;
+	struct drm_gem_dma_object *obj;
 
 #if IS_ENABLED(CONFIG_XILINX_DMA)
 	struct xilinx_vdma_config vdma_config;
@@ -58,7 +60,7 @@ static struct dma_async_tx_descriptor *axi_hdmi_vdma_prep_interleaved_desc(
 	}
 #endif
 
-	obj = drm_fb_cma_get_gem_obj(plane->state->fb, 0);
+	obj = drm_fb_dma_get_gem_obj(plane->state->fb, 0);
 
 	offset = plane->state->crtc_x * fb->format->cpp[0] +
 		plane->state->crtc_y * fb->pitches[0];
@@ -71,7 +73,7 @@ static struct dma_async_tx_descriptor *axi_hdmi_vdma_prep_interleaved_desc(
 	 * is fb->piches[0], but the actual size for the hw is somewhat less
 	 */
 	axi_hdmi_crtc->dma_template->dir = DMA_MEM_TO_DEV;
-	axi_hdmi_crtc->dma_template->src_start = obj->paddr + offset;
+	axi_hdmi_crtc->dma_template->src_start = obj->dma_addr + offset;
 	/* sgl list have just one entry (each interleaved frame have 1 chunk) */
 	axi_hdmi_crtc->dma_template->frame_size = 1;
 	/* the number of interleaved frame, each has the size specified in sgl */
@@ -97,7 +99,7 @@ static struct dma_async_tx_descriptor *axi_hdmi_vdma_prep_interleaved_desc(
 }
 
 static void axi_hdmi_plane_atomic_update(struct drm_plane *plane,
-	struct drm_plane_state *old_state)
+	struct drm_atomic_state *old_state)
 {
 	struct axi_hdmi_crtc *axi_hdmi_crtc = plane_to_axi_hdmi_crtc(plane);
 	struct dma_async_tx_descriptor *desc;
@@ -118,12 +120,12 @@ static void axi_hdmi_plane_atomic_update(struct drm_plane *plane,
 }
 
 static void axi_hdmi_crtc_enable(struct drm_crtc *crtc,
-				 struct drm_crtc_state *old_state)
+				 struct drm_atomic_state *old_state)
 {
 }
 
 static void axi_hdmi_crtc_disable(struct drm_crtc *crtc,
-				  struct drm_crtc_state *old_state)
+				  struct drm_atomic_state *old_state)
 {
 	struct axi_hdmi_crtc *axi_hdmi_crtc = to_axi_hdmi_crtc(crtc);
 
@@ -131,7 +133,7 @@ static void axi_hdmi_crtc_disable(struct drm_crtc *crtc,
 }
 
 static void axi_hdmi_crtc_atomic_begin(struct drm_crtc *crtc,
-	struct drm_crtc_state *state)
+	struct drm_atomic_state *state)
 {
 	struct drm_pending_vblank_event *event = crtc->state->event;
 

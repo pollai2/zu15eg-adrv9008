@@ -10,22 +10,15 @@
  * Copyright (c) 2011 Analog Devices Inc.
  */
 
-#include <linux/interrupt.h>
 #include <linux/irq.h>
-#include <linux/delay.h>
-#include <linux/mutex.h>
 #include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/spi/spi.h>
-#include <linux/slab.h>
-#include <linux/sysfs.h>
-#include <linux/list.h>
 #include <linux/module.h>
 #include <linux/debugfs.h>
 #include <linux/bitops.h>
 
 #include <linux/iio/iio.h>
-#include <linux/iio/sysfs.h>
 #include <linux/iio/buffer.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/imu/adis.h>
@@ -473,7 +466,7 @@ static int adis16400_initial_setup(struct iio_dev *indio_dev)
 
 		dev_info(&indio_dev->dev, "%s: prod_id 0x%04x at CS%d (irq %d)\n",
 			indio_dev->name, prod_id,
-			st->adis.spi->chip_select, st->adis.spi->irq);
+			spi_get_chipselect(st->adis.spi, 0), st->adis.spi->irq);
 	}
 	/* use high spi speed if possible */
 	if (st->variant->flags & ADIS16400_HAS_SLOW_MODE) {
@@ -527,7 +520,6 @@ static int adis16400_write_raw(struct iio_dev *indio_dev,
 
 		ret = __adis16400_set_filter(indio_dev, sps,
 			val * 1000 + val2 / 1000);
-
 		adis_dev_unlock(&st->adis);
 		return ret;
 	case IIO_CHAN_INFO_SAMP_FREQ:
@@ -649,13 +641,23 @@ static irqreturn_t adis16400_trigger_handler(int irq, void *p)
 	if (ret)
 		dev_err(&adis->spi->dev, "Failed to read data: %d\n", ret);
 
-	if (st->variant->flags & ADIS16400_BURST_DIAG_STAT)
+	if (st->variant->flags & ADIS16400_BURST_DIAG_STAT) {
 		buffer = adis->buffer + sizeof(u16);
-	else
-		buffer = adis->buffer;
+		/*
+		 * The size here is always larger than, or equal to the true
+		 * size of the channel data. This may result in a larger copy
+		 * than necessary, but as the target buffer will be
+		 * buffer->scan_bytes this will be safe.
+		 */
+		iio_push_to_buffers_with_ts_unaligned(indio_dev, buffer,
+						      indio_dev->scan_bytes - sizeof(pf->timestamp),
+						      pf->timestamp);
+	} else {
+		iio_push_to_buffers_with_timestamp(indio_dev,
+						   adis->buffer,
+						   pf->timestamp);
+	}
 
-	iio_push_to_buffers_with_timestamp(indio_dev, buffer,
-		pf->timestamp);
 
 	iio_trigger_notify_done(indio_dev->trig);
 
@@ -1165,8 +1167,6 @@ static int adis16400_probe(struct spi_device *spi)
 		return -ENOMEM;
 
 	st = iio_priv(indio_dev);
-	/* this is only used for removal purposes */
-	spi_set_drvdata(spi, indio_dev);
 
 	/* setup the industrialio driver allocated elements */
 	st->variant = &adis16400_chips[spi_get_device_id(spi)->driver_data];
@@ -1240,3 +1240,4 @@ module_spi_driver(adis16400_driver);
 MODULE_AUTHOR("Manuel Stahl <manuel.stahl@iis.fraunhofer.de>");
 MODULE_DESCRIPTION("Analog Devices ADIS16400/5 IMU SPI driver");
 MODULE_LICENSE("GPL v2");
+MODULE_IMPORT_NS(IIO_ADISLIB);

@@ -25,7 +25,8 @@
 #include <crypto/hash.h>
 #include <crypto/md5.h>
 #include <crypto/scatterwalk.h>
-#include <crypto/sha.h>
+#include <crypto/sha1.h>
+#include <crypto/sha2.h>
 #include <crypto/internal/hash.h>
 
 #define HASH_CR				0x00
@@ -564,9 +565,9 @@ static int stm32_hash_dma_send(struct stm32_hash_dev *hdev)
 	}
 
 	for_each_sg(rctx->sg, tsg, rctx->nents, i) {
+		sg[0] = *tsg;
 		len = sg->length;
 
-		sg[0] = *tsg;
 		if (sg_is_last(sg)) {
 			if (hdev->dma_mode == 1) {
 				len = (ALIGN(sg->length, 16) - 16);
@@ -1566,8 +1567,6 @@ static int stm32_hash_remove(struct platform_device *pdev)
 		return -ENODEV;
 
 	ret = pm_runtime_get_sync(hdev->dev);
-	if (ret < 0)
-		return ret;
 
 	stm32_hash_unregister_algs(hdev);
 
@@ -1583,7 +1582,8 @@ static int stm32_hash_remove(struct platform_device *pdev)
 	pm_runtime_disable(hdev->dev);
 	pm_runtime_put_noidle(hdev->dev);
 
-	clk_disable_unprepare(hdev->clk);
+	if (ret >= 0)
+		clk_disable_unprepare(hdev->clk);
 
 	return 0;
 }

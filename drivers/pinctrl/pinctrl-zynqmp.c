@@ -40,6 +40,12 @@
 #define DRIVE_STRENGTH_8MA	8
 #define DRIVE_STRENGTH_12MA	12
 
+#define VERSAL_LPD_MIO_BASE_ID		0x14104001U
+#define VERSAL_PMC_MIO_BASE_ID		0x1410801bU
+#define VERSAL_LPD_MIO_END_PIN		25
+#define VERSAL_LPD_PIN_PREFIX		"LPD_MIO"
+#define VERSAL_PMC_PIN_PREFIX		"PMC_MIO"
+
 /**
  * struct zynqmp_pmux_function - a pinmux function
  * @name:	Name of the pin mux function
@@ -87,33 +93,6 @@ struct zynqmp_pctrl_group {
 	unsigned int pins[MAX_GROUP_PIN];
 	unsigned int npins;
 };
-
-/**
- * enum zynqmp_pin_config_param - possible pin configuration parameters
- * @PIN_CONFIG_IOSTANDARD:	if the pin can select an IO standard,
- *				the argument to this parameter (on a
- *				custom format) tells the driver which
- *				alternative IO standard to use
- * @PIN_CONFIG_SCHMITTCMOS:	this parameter (on a custom format) allows
- *				to select schmitt or cmos input for MIO pins
- */
-enum zynqmp_pin_config_param {
-	PIN_CONFIG_IOSTANDARD = PIN_CONFIG_END + 1,
-	PIN_CONFIG_SCHMITTCMOS,
-};
-
-static const struct pinconf_generic_params zynqmp_dt_params[] = {
-	{"io-standard", PIN_CONFIG_IOSTANDARD, IO_STANDARD_LVCMOS18},
-	{"schmitt-cmos", PIN_CONFIG_SCHMITTCMOS, PIN_INPUT_TYPE_SCHMITT},
-};
-
-#ifdef CONFIG_DEBUG_FS
-static const struct
-pin_config_item zynqmp_conf_items[ARRAY_SIZE(zynqmp_dt_params)] = {
-	PCONFDUMP(PIN_CONFIG_IOSTANDARD, "IO-standard", NULL, true),
-	PCONFDUMP(PIN_CONFIG_SCHMITTCMOS, "schmitt-cmos", NULL, true),
-};
-#endif
 
 static struct pinctrl_desc zynqmp_desc;
 
@@ -190,6 +169,8 @@ static const char *zynqmp_pmux_get_function_name(struct pinctrl_dev *pctldev,
  * @num_groups:	Number of function groups.
  *
  * Get function's group count and group names.
+ *
+ * Return: 0
  */
 static int zynqmp_pmux_get_function_groups(struct pinctrl_dev *pctldev,
 					   unsigned int selector,
@@ -308,20 +289,8 @@ static int zynqmp_pinconf_cfg_get(struct pinctrl_dev *pctldev,
 
 		arg = 1;
 		break;
-	case PIN_CONFIG_IOSTANDARD:
-		dev_warn(pctldev->dev,
-			 "'io-standard' will be deprecated post 2021.2 release, instead use 'power-source'.\n");
-		param = PM_PINCTRL_CONFIG_VOLTAGE_STATUS;
-		ret = zynqmp_pm_pinctrl_get_config(pin, param, &arg);
-		break;
 	case PIN_CONFIG_POWER_SOURCE:
 		param = PM_PINCTRL_CONFIG_VOLTAGE_STATUS;
-		ret = zynqmp_pm_pinctrl_get_config(pin, param, &arg);
-		break;
-	case PIN_CONFIG_SCHMITTCMOS:
-		dev_warn(pctldev->dev,
-			 "'schmitt-cmos' will be deprecated post 2021.2 release, instead use 'input-schmitt-enable/disable'.\n");
-		param = PM_PINCTRL_CONFIG_SCHMITT_CMOS;
 		ret = zynqmp_pm_pinctrl_get_config(pin, param, &arg);
 		break;
 	case PIN_CONFIG_INPUT_SCHMITT_ENABLE:
@@ -409,12 +378,6 @@ static int zynqmp_pinconf_cfg_set(struct pinctrl_dev *pctldev,
 			arg = PM_PINCTRL_BIAS_DISABLE;
 			ret = zynqmp_pm_pinctrl_set_config(pin, param, arg);
 			break;
-		case PIN_CONFIG_SCHMITTCMOS:
-			dev_warn(pctldev->dev,
-				 "'schmitt-cmos' will be deprecated post 2021.2 release, instead use 'input-schmitt-enable/disable'.\n");
-			param = PM_PINCTRL_CONFIG_SCHMITT_CMOS;
-			ret = zynqmp_pm_pinctrl_set_config(pin, param, arg);
-			break;
 		case PIN_CONFIG_INPUT_SCHMITT_ENABLE:
 			param = PM_PINCTRL_CONFIG_SCHMITT_CMOS;
 			ret = zynqmp_pm_pinctrl_set_config(pin, param, arg);
@@ -444,16 +407,6 @@ static int zynqmp_pinconf_cfg_set(struct pinctrl_dev *pctldev,
 			param = PM_PINCTRL_CONFIG_DRIVE_STRENGTH;
 			ret = zynqmp_pm_pinctrl_set_config(pin, param, value);
 			break;
-		case PIN_CONFIG_IOSTANDARD:
-			dev_warn(pctldev->dev,
-				 "'io-standard' will be deprecated post 2021.2 release, instead use 'power-source'.\n");
-			param = PM_PINCTRL_CONFIG_VOLTAGE_STATUS;
-			ret = zynqmp_pm_pinctrl_get_config(pin, param, &value);
-			if (arg != value)
-				dev_warn(pctldev->dev,
-					 "Invalid IO Standard requested for pin %d\n",
-					 pin);
-			break;
 		case PIN_CONFIG_POWER_SOURCE:
 			param = PM_PINCTRL_CONFIG_VOLTAGE_STATUS;
 			ret = zynqmp_pm_pinctrl_get_config(pin, param, &value);
@@ -465,13 +418,22 @@ static int zynqmp_pinconf_cfg_set(struct pinctrl_dev *pctldev,
 
 			break;
 		case PIN_CONFIG_BIAS_HIGH_IMPEDANCE:
-		case PIN_CONFIG_LOW_POWER_MODE:
+			param = PM_PINCTRL_CONFIG_TRI_STATE;
+			arg = PM_PINCTRL_TRI_STATE_ENABLE;
+			ret = zynqmp_pm_pinctrl_set_config(pin, param, arg);
+			break;
+		case PIN_CONFIG_MODE_LOW_POWER:
 			/*
-			 * This cases are mentioned in dts but configurable
+			 * These cases are mentioned in dts but configurable
 			 * registers are unknown. So falling through to ignore
 			 * boot time warnings as of now.
 			 */
 			ret = 0;
+			break;
+		case PIN_CONFIG_OUTPUT_ENABLE:
+			param = PM_PINCTRL_CONFIG_TRI_STATE;
+			arg = PM_PINCTRL_TRI_STATE_DISABLE;
+			ret = zynqmp_pm_pinctrl_set_config(pin, param, arg);
 			break;
 		default:
 			dev_warn(pctldev->dev,
@@ -535,9 +497,6 @@ static struct pinctrl_desc zynqmp_desc = {
 	.pctlops = &zynqmp_pctrl_ops,
 	.pmxops = &zynqmp_pinmux_ops,
 	.confops = &zynqmp_pinconf_ops,
-#ifdef CONFIG_DEBUG_FS
-	.custom_conf_items = zynqmp_conf_items,
-#endif
 };
 
 static int zynqmp_pinctrl_get_function_groups(u32 fid, u32 index, u16 *groups)
@@ -762,7 +721,7 @@ static int zynqmp_pinctrl_prepare_group_pins(struct device *dev,
 	int ret;
 
 	for (pin = 0; pin < zynqmp_desc.npins; pin++) {
-		ret = zynqmp_pinctrl_create_pin_groups(dev, groups, pin);
+		ret = zynqmp_pinctrl_create_pin_groups(dev, groups, zynqmp_desc.pins[pin].number);
 		if (ret)
 			return ret;
 	}
@@ -850,6 +809,43 @@ static int zynqmp_pinctrl_get_num_pins(unsigned int *npins)
 	return 0;
 }
 
+static int versal_pinctrl_prepare_pin_desc(struct device *dev,
+					   const struct pinctrl_pin_desc **zynqmp_pins,
+					   unsigned int *npins)
+{
+	struct pinctrl_pin_desc *pins, *pin;
+	int ret;
+	int i;
+
+	ret = zynqmp_pinctrl_get_num_pins(npins);
+	if (ret)
+		return ret;
+
+	pins = devm_kzalloc(dev, sizeof(*pins) * *npins, GFP_KERNEL);
+	if (!pins)
+		return -ENOMEM;
+
+	for (i = 0; i < *npins; i++) {
+		pin = &pins[i];
+		if (i <= VERSAL_LPD_MIO_END_PIN) {
+			pin->number = VERSAL_LPD_MIO_BASE_ID + i;
+			pin->name = devm_kasprintf(dev, GFP_KERNEL, "%s%d",
+						   VERSAL_LPD_PIN_PREFIX, i);
+		} else {
+			pin->number = VERSAL_PMC_MIO_BASE_ID + (i - (VERSAL_LPD_MIO_END_PIN + 1));
+			pin->name = devm_kasprintf(dev, GFP_KERNEL, "%s%d", VERSAL_PMC_PIN_PREFIX,
+						   (i - VERSAL_LPD_MIO_END_PIN) - 1);
+		}
+
+		if (!pin->name)
+			return -ENOMEM;
+	}
+
+	*zynqmp_pins = pins;
+
+	return 0;
+}
+
 /**
  * zynqmp_pinctrl_prepare_pin_desc() - prepare pin description info
  * @dev:		Device pointer.
@@ -901,9 +897,18 @@ static int zynqmp_pinctrl_probe(struct platform_device *pdev)
 	if (!pctrl)
 		return -ENOMEM;
 
-	ret = zynqmp_pinctrl_prepare_pin_desc(&pdev->dev,
-					      &zynqmp_desc.pins,
-					      &zynqmp_desc.npins);
+	if (of_device_is_compatible(pdev->dev.of_node,
+				    "xlnx,versal-pinctrl")) {
+		dev_info(&pdev->dev, "This is an experimental solution(hardcoded the MIO ID\n"
+			"information) and this solution will be deprecated and use PM interface\n"
+			"to get the MIO IDs information\n");
+		ret = versal_pinctrl_prepare_pin_desc(&pdev->dev, &zynqmp_desc.pins,
+						      &zynqmp_desc.npins);
+	} else {
+		ret = zynqmp_pinctrl_prepare_pin_desc(&pdev->dev, &zynqmp_desc.pins,
+						      &zynqmp_desc.npins);
+	}
+
 	if (ret) {
 		dev_err(&pdev->dev, "pin desc prepare fail with %d\n", ret);
 		return ret;
@@ -919,16 +924,14 @@ static int zynqmp_pinctrl_probe(struct platform_device *pdev)
 	if (IS_ERR(pctrl->pctrl))
 		return PTR_ERR(pctrl->pctrl);
 
-
 	platform_set_drvdata(pdev, pctrl);
 
-	dev_info(&pdev->dev, "zynqmp pinctrl initialized\n");
-
-	return 0;
+	return ret;
 }
 
 static const struct of_device_id zynqmp_pinctrl_of_match[] = {
 	{ .compatible = "xlnx,zynqmp-pinctrl" },
+	{ .compatible = "xlnx,versal-pinctrl" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, zynqmp_pinctrl_of_match);

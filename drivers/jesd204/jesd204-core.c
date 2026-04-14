@@ -2,7 +2,7 @@
 /**
  * The JESD204 framework - core logic
  *
- * Copyright (c) 2019 Analog Devices Inc.
+ * Copyright (c) 2019-2024 Analog Devices Inc.
  */
 
 #define pr_fmt(fmt) "jesd204: " fmt
@@ -34,6 +34,16 @@ static bool jesd204_dyn_dt_change;
 
 static void jesd204_dev_unregister(struct jesd204_dev *jdev);
 
+/**
+ * jesd204_get_active_links_num() - Get the number of active links for a JESD204 device.
+ * @param jdev The JESD204 device structure.
+ *
+ * This function retrieves the number of active links for a given JESD204 device.
+ *
+ * @return The number of active links on success, or a negative error code on failure.
+ *         -EINVAL is returned if jdev is NULL.
+ *         -EFAULT is returned if the top-level device cannot be found.
+ */
 int jesd204_get_active_links_num(struct jesd204_dev *jdev)
 {
 	struct jesd204_dev_top *jdev_top;
@@ -49,7 +59,20 @@ int jesd204_get_active_links_num(struct jesd204_dev *jdev)
 
 	return jdev_top->num_links;
 }
+EXPORT_SYMBOL_GPL(jesd204_get_active_links_num);
 
+/**
+ * jesd204_get_links_data() - Get the links data for a JESD204 device
+ * @jdev: Pointer to the JESD204 device structure
+ * @links: Array of pointers to store the links data
+ * @num_links: Number of links to retrieve
+ *
+ * This function retrieves the links data for a JESD204 device. It takes a
+ * pointer to the JESD204 device structure, an array of pointers to store the
+ * links data, and the number of links to retrieve.
+ *
+ * Returns 0 on success, or a negative error code on failure.
+ */
 int jesd204_get_links_data(struct jesd204_dev *jdev,
 			   struct jesd204_link ** const links,
 			   const unsigned int num_links)
@@ -80,6 +103,16 @@ int jesd204_get_links_data(struct jesd204_dev *jdev,
 }
 EXPORT_SYMBOL_GPL(jesd204_get_links_data);
 
+/**
+ * jesd204_link_get_state_str() - Get the state string of a JESD204 link
+ * @lnk: Pointer to the JESD204 link structure
+ *
+ * This function returns a string representation of the state of a JESD204 link.
+ * It takes a pointer to the JESD204 link structure and retrieves the state string
+ * by calling the jesd204_state_str() function.
+ *
+ * Return: Pointer to the state string
+ */
 const char *jesd204_link_get_state_str(const struct jesd204_link *lnk)
 {
 	struct jesd204_link_opaque *ol =
@@ -89,6 +122,14 @@ const char *jesd204_link_get_state_str(const struct jesd204_link *lnk)
 }
 EXPORT_SYMBOL_GPL(jesd204_link_get_state_str);
 
+/**
+ * jesd204_link_get_paused() - Check if the JESD204 link is paused.
+ * @lnk: Pointer to the JESD204 link structure.
+ *
+ * This function checks if the JESD204 link is currently paused.
+ *
+ * Return: true if the link is paused, false otherwise.
+ */
 bool jesd204_link_get_paused(const struct jesd204_link *lnk)
 {
 	struct jesd204_link_opaque *ol =
@@ -98,7 +139,7 @@ bool jesd204_link_get_paused(const struct jesd204_link *lnk)
 }
 EXPORT_SYMBOL_GPL(jesd204_link_get_paused);
 
-int jesd204_device_count_get()
+int jesd204_device_count_get(void)
 {
 	return jesd204_device_count;
 }
@@ -148,6 +189,17 @@ static int jesd204_link_validate_params(const struct jesd204_link *lnk)
 	return 0;
 }
 
+/**
+ * jesd204_link_get_rate() - Get the lane rate for a JESD204 link
+ * @lnk: Pointer to the JESD204 link structure
+ * @lane_rate_hz: Pointer to store the calculated lane rate in Hz
+ *
+ * This function calculates the lane rate for a JESD204 link based on the
+ * parameters specified in the JESD204 link structure. The calculated lane
+ * rate is stored in the variable pointed to by @lane_rate_hz.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 int jesd204_link_get_rate(struct jesd204_link *lnk, u64 *lane_rate_hz)
 {
 	u64 rate, encoding_n, encoding_d;
@@ -195,6 +247,17 @@ int jesd204_link_get_rate(struct jesd204_link *lnk, u64 *lane_rate_hz)
 }
 EXPORT_SYMBOL_GPL(jesd204_link_get_rate);
 
+/**
+ * jesd204_link_get_rate_khz() - Get the lane rate in kilohertz for a JESD204 link
+ * @lnk: Pointer to the JESD204 link structure
+ * @lane_rate_khz: Pointer to store the lane rate in kilohertz
+ *
+ * This function retrieves the lane rate in kilohertz for a JESD204 link.
+ * It calls jesd204_link_get_rate() to get the lane rate in hertz and then
+ * converts it to kilohertz by dividing it by 1000.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 int jesd204_link_get_rate_khz(struct jesd204_link *lnk,
 			      unsigned long *lane_rate_khz)
 {
@@ -211,6 +274,17 @@ int jesd204_link_get_rate_khz(struct jesd204_link *lnk,
 }
 EXPORT_SYMBOL_GPL(jesd204_link_get_rate_khz);
 
+/**
+ * jesd204_link_get_device_clock() - Get the device clock frequency for a JESD204 link
+ * @lnk: Pointer to the JESD204 link structure
+ * @device_clock: Pointer to store the device clock frequency in Hz
+ *
+ * This function calculates the device clock frequency for a JESD204 link based on the
+ * lane rate and encoding scheme. The resulting device clock frequency is stored in the
+ * variable pointed to by @device_clock.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 int jesd204_link_get_device_clock(struct jesd204_link *lnk,
 				  unsigned long *device_clock)
 {
@@ -251,6 +325,14 @@ int jesd204_link_get_device_clock(struct jesd204_link *lnk,
 }
 EXPORT_SYMBOL_GPL(jesd204_link_get_device_clock);
 
+/**
+ * jesd204_copy_link_params() - Copy link parameters from one JESD204 link to another
+ * @dst: Pointer to the destination JESD204 link structure
+ * @src: Pointer to the source JESD204 link structure
+ *
+ * This function copies the link parameters from the source JESD204 link structure
+ * to the destination JESD204 link structure.
+ */
 void jesd204_copy_link_params(struct jesd204_link *dst,
 			      const struct jesd204_link *src)
 {
@@ -275,12 +357,24 @@ void jesd204_copy_link_params(struct jesd204_link *dst,
 	dst->dac_adj_resolution_steps = src->dac_adj_resolution_steps;
 	dst->dac_adj_direction = src->dac_adj_direction;
 	dst->dac_phase_adj = src->dac_phase_adj;
-	dst->sysref.mode = dst->sysref.mode;
-	dst->sysref.capture_falling_edge = dst->sysref.capture_falling_edge;
-	dst->sysref.valid_falling_edge = dst->sysref.valid_falling_edge;
-	dst->sysref.lmfc_offset = dst->sysref.lmfc_offset;
+	dst->sysref.mode = src->sysref.mode;
+	dst->sysref.capture_falling_edge = src->sysref.capture_falling_edge;
+	dst->sysref.valid_falling_edge = src->sysref.valid_falling_edge;
+	dst->sysref.lmfc_offset = src->sysref.lmfc_offset;
 }
 EXPORT_SYMBOL_GPL(jesd204_copy_link_params);
+
+/**
+ * jesd204_link_get_lmfc_lemc_rate() - Get the LMFC/LEMC rate for a JESD204 link
+ * @lnk: Pointer to the JESD204 link structure
+ * @rate_hz: Pointer to store the LMFC/LEMC rate in Hz
+ *
+ * This function calculates the LMFC/LEMC rate for a JESD204 link based on the
+ * link configuration parameters. The calculated rate is stored in the variable
+ * pointed to by @rate_hz.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 
 int jesd204_link_get_lmfc_lemc_rate(struct jesd204_link *lnk,
 				    unsigned long *rate_hz)
@@ -298,7 +392,7 @@ int jesd204_link_get_lmfc_lemc_rate(struct jesd204_link *lnk,
 		switch (lnk->jesd_encoder) {
 		case JESD204_ENCODER_64B66B:
 			bkw = 66; /* JESD 204C */
-			/* fall-through */
+			fallthrough;
 		case JESD204_ENCODER_64B80B:
 			if (lnk->jesd_encoder == JESD204_ENCODER_64B80B)
 				bkw = 80; /* JESD 204C */
@@ -352,6 +446,14 @@ struct jesd204_dev_top *jesd204_dev_get_topology_top_dev(struct jesd204_dev *jde
 	return NULL;
 }
 
+/**
+ * jesd204_sysref_async() - Trigger an asynchronous SYSREF event
+ * @jdev: The JESD204 device structure
+ *
+ * This function triggers an asynchronous SYSREF event for a given JESD204 device.
+ *
+ * Return: 0 on success, or a negative error code on failure.
+ */
 int jesd204_sysref_async(struct jesd204_dev *jdev)
 {
 	struct jesd204_dev_top *jdev_top = jesd204_dev_get_topology_top_dev(jdev);
@@ -374,6 +476,16 @@ int jesd204_sysref_async(struct jesd204_dev *jdev)
 }
 EXPORT_SYMBOL(jesd204_sysref_async);
 
+/**
+ * jesd204_sysref_async_force() - Trigger an asynchronous SYSREF event
+ * @jdev: The JESD204 device structure
+ *
+ * This function triggers an asynchronous SYSREF event for a given JESD204 device.
+ * If there is no primary SYSREF registered for the topology, it will trigger the
+ * secondary SYSREF. If there is no secondary SYSREF registered, it will return 0.
+ *
+ * Return: 0 on success, or a negative error code on failure.
+ */
 int jesd204_sysref_async_force(struct jesd204_dev *jdev)
 {
 	struct jesd204_dev_top *jdev_top = jesd204_dev_get_topology_top_dev(jdev);
@@ -400,6 +512,14 @@ int jesd204_sysref_async_force(struct jesd204_dev *jdev)
 }
 EXPORT_SYMBOL(jesd204_sysref_async_force);
 
+/**
+ * jesd204_dev_is_top() - Check if the given JESD204 device is the top-level device.
+ * @jdev: The JESD204 device to check.
+ *
+ * This function checks if the given JESD204 device is the top-level device in the topology.
+ *
+ * Return: True if the device is the top-level device, false otherwise.
+ */
 bool jesd204_dev_is_top(struct jesd204_dev *jdev)
 {
 	return jdev && jdev->is_top;
@@ -411,12 +531,32 @@ static inline bool dev_is_jesd204_dev(struct device *dev)
 	return device_property_read_bool(dev, "jesd204-device");
 }
 
+/**
+ * jesd204_dev_priv() - Retrieves the private data associated with a JESD204 device
+ * @jdev: The JESD204 device for which to retrieve the private data
+ *
+ * This function returns a pointer to the private data structure associated with
+ * the given JESD204 device. The private data structure contains device-specific
+ * information and state.
+ *
+ * Return: A pointer to the private data structure.
+ */
 void *jesd204_dev_priv(struct jesd204_dev *jdev)
 {
 	return jdev->priv;
 }
 EXPORT_SYMBOL_GPL(jesd204_dev_priv);
 
+/**
+ * jesd204_dev_from_device() - Retrieve the jesd204_dev structure associated with a given device.
+ * @dev: Pointer to the device structure.
+ *
+ * This function searches the jesd204_device_list for a jesd204_dev structure
+ * whose parent device matches the given device. If a match is found, a pointer
+ * to the jesd204_dev structure is returned. Otherwise, NULL is returned.
+ *
+ * Return: Pointer to the jesd204_dev structure if found, NULL otherwise.
+ */
 struct jesd204_dev *jesd204_dev_from_device(struct device *dev)
 {
 	struct jesd204_dev *jdev;
@@ -433,6 +573,16 @@ struct jesd204_dev *jesd204_dev_from_device(struct device *dev)
 }
 EXPORT_SYMBOL_GPL(jesd204_dev_from_device);
 
+/**
+ * jesd204_dev_to_device() - Retrieves the parent device associated with a JESD204 device.
+ * @jdev: Pointer to the JESD204 device structure.
+ *
+ * This function takes a pointer to a JESD204 device structure and returns
+ * a pointer to the parent device structure. If the input JESD204 device
+ * pointer is NULL, the function returns NULL.
+ *
+ * Return: Pointer to the parent device structure, or NULL if @jdev is NULL.
+ */
 struct device *jesd204_dev_to_device(struct jesd204_dev *jdev)
 {
 	return jdev ? jdev->dev.parent : NULL;
@@ -477,6 +627,7 @@ void jesd204_printk(const char *level, const struct jesd204_dev *jdev,
 
 	va_end(args);
 }
+EXPORT_SYMBOL_GPL(jesd204_printk);
 
 static int jesd204_dev_alloc_links(struct jesd204_dev_top *jdev_top)
 {
@@ -887,7 +1038,6 @@ static int jesd204_dev_init_links_data(struct device *parent,
 	 * or a link init op/callback which should do JESD204 link init.
 	 */
 	if (!init->links &&
-	    !init->state_ops &&
 	    !init->state_ops[JESD204_OP_LINK_INIT].per_link) {
 		jesd204_err(jdev,
 			    "num_links is non-zero, but no links data provided\n");
@@ -1028,9 +1178,15 @@ static void jesd204_of_unregister_devices(void)
 }
 
 /**
- * jesd204_dev_unregister() - unregister a device from the JESD204 subsystem
- * @jdev:		Device structure representing the device.
- **/
+ * jesd204_dev_unregister() - Unregister a device from the JESD204 subsystem
+ * @jdev: Device structure representing the device.
+ *
+ * This function unregisters a device from the JESD204 subsystem. It takes a
+ * device structure as input and performs the necessary cleanup operations to
+ * unregister the device. This includes destroying the sysfs entries, stopping
+ * the FSM (Finite State Machine), and freeing the memory allocated for the
+ * device structure.
+ */
 static void jesd204_dev_unregister(struct jesd204_dev *jdev)
 {
 	if (IS_ERR_OR_NULL(jdev))
@@ -1041,9 +1197,12 @@ static void jesd204_dev_unregister(struct jesd204_dev *jdev)
 	if (jdev->dev.parent)
 		device_del(&jdev->dev);
 
+	jdev->fsm_rb_to_init = true;
 	jesd204_fsm_stop(jdev, JESD204_LINKS_ALL);
+	jdev->fsm_rb_to_init = false;
 
 	memset(&jdev->dev, 0, sizeof(jdev->dev));
+	jdev->fsm_inited = false;
 }
 
 static void devm_jesd204_dev_unreg(struct device *dev, void *res)
@@ -1051,6 +1210,20 @@ static void devm_jesd204_dev_unreg(struct device *dev, void *res)
 	jesd204_dev_unregister(*(struct jesd204_dev **)res);
 }
 
+/**
+ * devm_jesd204_dev_register() - Register a JESD204 device
+ * @dev: Pointer to the device structure
+ * @i: Pointer to the JESD204 device data structure
+ *
+ * This function registers a JESD204 device with the given device structure and
+ * JESD204 device data. It checks if the device is a JESD204 device and allocates
+ * memory for the JESD204 device structure. If successful, it registers the device
+ * and adds it to the device resource list. If registration fails, the allocated
+ * memory is freed.
+ *
+ * Return: Pointer to the registered JESD204 device on success, or an error
+ *         pointer on failure.
+ */
 struct jesd204_dev *devm_jesd204_dev_register(struct device *dev,
 					      const struct jesd204_dev_data *i)
 {
@@ -1091,11 +1264,17 @@ static int jesd204_overlay_has_device(struct device_node *node)
 }
 
 /**
- * of_jesd204_notify - reconfig notifier for dynamic DT changes
- * @nb:		notifier block
- * @action:	notifier action
- * @arg:	reconfig data
+ * of_jesd204_notify() - Reconfig notifier for dynamic DT changes
+ * @nb:         Notifier block
+ * @action:     Notifier action
+ * @arg:        Reconfig data
  *
+ * This function is a notifier callback for dynamic device tree changes related
+ * to JESD204 devices. It is called when an overlay is applied, removed, or
+ * during pre-apply and pre-remove stages. The function handles the necessary
+ * actions based on the action parameter.
+ *
+ * Return: NOTIFY_OK on success, or an error code on failure.
  */
 static int of_jesd204_notify(struct notifier_block *nb,
 				 unsigned long action, void *arg)

@@ -2,7 +2,7 @@
 /**
  * The JESD204 framework - finite state machine logic
  *
- * Copyright (c) 2019 Analog Devices Inc.
+ * Copyright (c) 2019-2024 Analog Devices Inc.
  */
 
 #include <linux/kernel.h>
@@ -70,6 +70,7 @@ static int jesd204_fsm_handle_con(struct jesd204_dev *jdev,
  * @state		target JESD204 state
  * @op			callback ID associated with transitioning to @state
  * @first		marker for the first state in the transition series (when iterating backward)
+ * @first_init		marker for the first state in the transition series when starting from scratch
  * @last		marker for the last state in the transition series (when iterating forward)
  * @post_hook		hook to be run for this state, in the done_cb part
  */
@@ -77,6 +78,7 @@ struct jesd204_fsm_table_entry {
 	enum jesd204_dev_state	state;
 	enum jesd204_dev_op	op;
 	bool			first;
+	bool			first_init;
 	bool			last;
 	jesd204_fsm_done_cb	post_hook;
 };
@@ -88,6 +90,12 @@ struct jesd204_fsm_table_entry {
 struct jesd204_fsm_table_entry_iter {
 	const struct jesd204_fsm_table_entry	*table;
 };
+
+#define JESD204_STATE_NOP_INIT(x)					\
+{								\
+	.state = JESD204_STATE_##x,				\
+	.first_init = true,						\
+}
 
 #define JESD204_STATE_NOP(x)					\
 {								\
@@ -123,6 +131,8 @@ static void __jesd204_fsm_clear_errors(struct jesd204_dev *jdev,
 
 /* States to transition to start a JESD204 link */
 static const struct jesd204_fsm_table_entry jesd204_start_links_states[] = {
+	JESD204_STATE_NOP_INIT(INITIALIZED),
+	JESD204_STATE_NOP(PROBED),
 	JESD204_STATE_NOP(IDLE),
 	JESD204_STATE_OP(DEVICE_INIT),
 	JESD204_STATE_OP_WITH_POST_HOOK(LINK_INIT, jesd204_fsm_init_link),
@@ -1075,12 +1085,34 @@ static int __jesd204_fsm_start(struct jesd204_dev *jdev, unsigned int link_idx,
 				      JESD204_STATE_IDLE, resuming, true);
 }
 
+/**
+ * jesd204_fsm_start() - Start the JESD204 finite state machine for a specific link.
+ * @jdev:      Pointer to the JESD204 device structure.
+ * @link_idx:  Index of the link to start.
+ *
+ * This function starts the JESD204 finite state machine for the specified link
+ * of the given JESD204 device. It calls the internal __jesd204_fsm_start() function
+ * with the specified JESD204 device and link index. The 'force' parameter is set to
+ * false, indicating that the start operation should not be forced.
+ *
+ * Return: 0 on success, negative error code on failure.
+ */
 int jesd204_fsm_start(struct jesd204_dev *jdev, unsigned int link_idx)
 {
 	return __jesd204_fsm_start(jdev, link_idx, false);
 }
 EXPORT_SYMBOL_GPL(jesd204_fsm_start);
 
+/**
+ * jesd204_fsm_resume() - Resume the JESD204 state machine for a specific link
+ * @jdev:      Pointer to the JESD204 device structure.
+ * @link_idx:  Index of the link to resume.
+ *
+ * This function resumes the JESD204 state machine for the specified link
+ * of the given JESD204 device.
+ *
+ * Return: 0 on success, negative error code on failure.
+ */
 int jesd204_fsm_resume(struct jesd204_dev *jdev, unsigned int link_idx)
 {
 	return __jesd204_fsm_start(jdev, link_idx, true);
@@ -1120,9 +1152,6 @@ static int jesd204_fsm_table_entry_cb(struct jesd204_dev *jdev,
 	struct jesd204_link_opaque *ol;
 
 	jesd204_fsm_handle_stop_state(jdev, link_idx, fsm_data);
-
-	if (!jdev->dev_data->state_ops)
-		return JESD204_STATE_CHANGE_DONE;
 
 	state_op = &jdev->dev_data->state_ops[it->table[0].op];
 
@@ -1174,8 +1203,11 @@ static int jesd204_fsm_table_entry_done(struct jesd204_dev *jdev,
 }
 
 static bool jesd204_fsm_table_end(const struct jesd204_fsm_table_entry *entry,
-				  bool rollback)
+				  bool rollback, bool full)
 {
+	if (rollback && full)
+		return entry->first_init;
+
 	if (rollback)
 		return entry->first;
 	return entry->last;
@@ -1245,7 +1277,7 @@ static int jesd204_fsm_table_single(struct jesd204_dev *jdev,
 	 * FIXME: the handle_busy_flags logic needs re-visit, we should lock
 	 * here and unlock after the loop is done
 	 */
-	while (!jesd204_fsm_table_end(&it->table[0], rollback)) {
+	while (!jesd204_fsm_table_end(&it->table[0], rollback, jdev->fsm_rb_to_init)) {
 		it->table = table;
 
 		state_op = &jdev->dev_data->state_ops[table[0].op];
@@ -1387,6 +1419,15 @@ static int jesd204_fsm_table(struct jesd204_dev *jdev,
 	return ret;
 }
 
+/**
+ * jesd204_fsm_stop() - Stop the JESD204 finite state machine for a specific link.
+ * @jdev:     Pointer to the JESD204 device structure.
+ * @link_idx: Index of the link to stop the FSM for.
+ *
+ * This function stops the JESD204 finite state machine for the specified link
+ * in the JESD204 device. If the JESD204 device has not been initialized, the
+ * function returns without performing any action.
+ */
 void jesd204_fsm_stop(struct jesd204_dev *jdev, unsigned int link_idx)
 {
 	const struct jesd204_fsm_table_entry *start;
@@ -1433,6 +1474,13 @@ static void __jesd204_fsm_clear_errors(struct jesd204_dev *jdev,
 	jesd204_fsm(jdev, &data, handle_busy_flags);
 }
 
+/**
+ * jesd204_fsm_clear_errors() - Clear errors for a specific JESD204 link
+ * @jdev:      Pointer to the JESD204 device structure
+ * @link_idx:  Index of the JESD204 link to clear errors for
+ *
+ * This function clears errors for a specific JESD204 link in the JESD204 device.
+ */
 void jesd204_fsm_clear_errors(struct jesd204_dev *jdev, unsigned int link_idx)
 {
 	__jesd204_fsm_clear_errors(jdev, link_idx, true);
